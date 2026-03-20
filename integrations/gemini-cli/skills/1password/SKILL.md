@@ -108,8 +108,8 @@ These references are safe to commit — they contain no secrets. Resolution happ
 ```bash
 # 1. op run with .env file — preferred for apps
 # .env.tpl (safe to commit):
-# DATABASE_URL=op://Production/PostgreSQL/connection-string
-# API_KEY=op://Production/ExternalAPI/key
+# DATABASE_URL=op://MyVault/PostgreSQL/connection-string
+# API_KEY=op://MyVault/ExternalAPI/key
 op run --env-file=.env.tpl -- ./start-server
 
 # 2. op inject for config file templating
@@ -118,12 +118,12 @@ op inject -i config.yml.tpl -o config.yml
 # WARNING: config.yml now contains live secrets — add to .gitignore, delete after use
 
 # 3. op read for single exported values
-export TOKEN=$(op read "op://Vault/Item/field")
+export TOKEN=$(op read --no-newline "op://Vault/Item/field")
 ```
 
 **MCP server pattern:** `.env` with `op://` references, safe to commit:
 ```bash
-# GITHUB_TOKEN=op://Private/GitHub/token
+# GITHUB_TOKEN=op://DevVault/GitHub/token
 op run --env-file=.env -- npx @modelcontextprotocol/server-github
 ```
 

@@ -61,29 +61,30 @@ done
 # --- --reveal flag on op item get ---
 printf "\n${C_BOLD}--reveal flag on op item get examples that retrieve passwords${C_RESET}\n"
 
-# Every 'op item get' that includes '--fields label=password' should have --reveal
-item_get_password_lines=$(grep -n 'op item get.*label=password' "$SKILL_MD" || true)
-if [[ -z "$item_get_password_lines" ]]; then
-  pass "No 'op item get ... label=password' lines to check"
+# Every 'op item get' that includes '--fields' should have --reveal (excluding comments and --format json)
+needs_reveal=$(grep -n 'op item get.*--fields' "$SKILL_MD" | grep -v -- '--reveal' | grep -v '^[0-9]*:\s*#' | grep -v -- '--format json' || true)
+if [[ -z "$needs_reveal" ]]; then
+  pass "'op item get' with --fields always includes --reveal"
 else
-  missing_reveal=$(echo "$item_get_password_lines" | grep -v -- '--reveal' || true)
-  if [[ -z "$missing_reveal" ]]; then
-    pass "'op item get' with label=password always includes --reveal"
-  else
-    fail "'op item get' with label=password missing --reveal on some lines"
-    echo "$missing_reveal" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       Line %s\n" "$line"; done
-  fi
+  fail "'op item get' with --fields missing --reveal on some lines"
+  echo "$needs_reveal" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       Line %s\n" "$line"; done
 fi
 
 # --- --vault flag on op item get / op item list ---
 printf "\n${C_BOLD}--vault flag on op item get/list examples${C_RESET}\n"
 
-# op item get lines in code blocks (lines starting with op item get, not comment lines)
-item_get_lines=$(grep -n 'op item get' "$SKILL_MD" | grep -v '^[0-9]*:.*#' | grep -v '^[0-9]*:.*--' || true)
-# Better: any code-context op item get line
-item_get_lines=$(grep -n '^op item get\|^  op item get\|^    op item get' "$SKILL_MD" 2>/dev/null || true)
+# Match op item get lines that look like actual commands (any indentation, including variable assignments)
+# Exclude: comment lines, backtick/quote inline references, prose descriptions, Fix: pointers
+item_get_lines=$(grep -n 'op item get' "$SKILL_MD" | \
+  grep -v '^[0-9]*:\s*#' | \
+  grep -v '^[0-9]*:.*`op item get`' | \
+  grep -v '^[0-9]*:.*"op item get"' | \
+  grep -v '^[0-9]*:.*Prefer' | \
+  grep -v '^[0-9]*:.*→' | \
+  grep -v '^[0-9]*:\*\*' | \
+  grep -v '^[0-9]*:.*op item get.*--format json' 2>/dev/null || true)
 if [[ -n "$item_get_lines" ]]; then
-  missing_vault=$(echo "$item_get_lines" | grep -v -- '--vault' || true)
+  missing_vault=$(echo "$item_get_lines" | grep -v -- '--vault' | grep -v '^\s*$' || true)
   if [[ -z "$missing_vault" ]]; then
     pass "'op item get' examples include --vault flag"
   else
@@ -91,10 +92,13 @@ if [[ -n "$item_get_lines" ]]; then
     echo "$missing_vault" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       %s\n" "$line"; done
   fi
 else
-  pass "No bare 'op item get' lines found to check"
+  pass "No 'op item get' command lines found to check"
 fi
 
-item_list_lines=$(grep -n '^op item list\|^  op item list\|^    op item list' "$SKILL_MD" 2>/dev/null || true)
+item_list_lines=$(grep -n 'op item list' "$SKILL_MD" | \
+  grep -v '^[0-9]*:\s*#' | \
+  grep -v '^[0-9]*:.*`op item list`' | \
+  grep -v "^[0-9]*:.*'op item list'" 2>/dev/null || true)
 if [[ -n "$item_list_lines" ]]; then
   missing_vault=$(echo "$item_list_lines" | grep -v -- '--vault' || true)
   if [[ -z "$missing_vault" ]]; then
@@ -110,7 +114,13 @@ fi
 # --- --no-newline on op read ---
 printf "\n${C_BOLD}--no-newline on op read examples${C_RESET}\n"
 
-op_read_lines=$(grep -n '^op read\|^  op read\|^    op read' "$SKILL_MD" 2>/dev/null || true)
+op_read_lines=$(grep -n 'op read' "$SKILL_MD" | \
+  grep -v '^[0-9]*:\s*#' | \
+  grep -v '^[0-9]*:.*`op read`' | \
+  grep -v "^[0-9]*:.*'op read'" | \
+  grep -v '^[0-9]*:.*Prefer' | \
+  grep -v '^[0-9]*:.*→' | \
+  grep -v '^[0-9]*:\*\*' 2>/dev/null || true)
 if [[ -n "$op_read_lines" ]]; then
   missing_nonewline=$(echo "$op_read_lines" | grep -v -- '--no-newline' || true)
   if [[ -z "$missing_nonewline" ]]; then
@@ -133,7 +143,11 @@ psub_count=$(gcount 'psub' "$SKILL_MD")
 
 if [[ "$proc_sub_count" -gt 0 ]]; then
   if [[ "$psub_count" -gt 0 ]]; then
-    pass "Fish psub alternative provided (process substitutions: $proc_sub_count, psub mentions: $psub_count)"
+    if [[ "$psub_count" -ge "$((proc_sub_count / 2))" ]]; then
+      pass "Fish psub alternative provided (process substitutions: $proc_sub_count, psub mentions: $psub_count)"
+    else
+      fail "Insufficient Fish psub alternatives ($psub_count psub for $proc_sub_count process substitutions)"
+    fi
   else
     fail "Fish psub alternatives missing: $proc_sub_count process substitutions but 0 psub mentions"
   fi

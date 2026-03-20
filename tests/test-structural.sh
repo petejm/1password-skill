@@ -82,6 +82,13 @@ else
   fail "plugin.json skill path points to an existing file (got: '$skill_path')"
 fi
 
+# plugin.json skill path should point to a SKILL.md file
+if [[ "$(basename "$REPO_ROOT/$skill_path")" == "SKILL.md" ]]; then
+  pass "plugin.json skill path points to a SKILL.md file"
+else
+  fail "plugin.json skill path does not point to a SKILL.md file (points to $(basename "$skill_path"))"
+fi
+
 # plugin.json version follows semver
 version=$(python3 -c "import json; d=json.load(open('$PLUGIN_JSON')); print(d.get('version',''))" 2>/dev/null || true)
 if echo "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -106,16 +113,20 @@ router_section=$(awk '/^# 1Password CLI — Decision Router/,/^## /' "$SKILL_MD"
 router_targets=$(echo "$router_section" | grep -E '\| → [A-Za-z]' | grep -oE '→ [A-Za-z][A-Za-z ]+' | sed 's/→ //' | sed 's/[[:space:]]*$//' | sort -u)
 
 printf "\n${C_BOLD}Decision Router → Section mapping${C_RESET}\n"
-while IFS= read -r target; do
-  # Skip "Error Catalog" as it's a special case checked separately
-  [[ -z "$target" ]] && continue
-  # Build regex for ## heading
-  if grep -qE "^## $target" "$SKILL_MD"; then
-    pass "Section '## $target' exists (referenced in router)"
-  else
-    fail "Section '## $target' exists (referenced in router)"
-  fi
-done <<< "$router_targets"
+if [[ -z "$router_section" ]]; then
+  fail "Decision router section heading not found — expected '# 1Password CLI — Decision Router'"
+else
+  while IFS= read -r target; do
+    # Skip "Error Catalog" as it's a special case checked separately
+    [[ -z "$target" ]] && continue
+    # Build regex for ## heading
+    if grep -qE "^## $target" "$SKILL_MD"; then
+      pass "Section '## $target' exists (referenced in router)"
+    else
+      fail "Section '## $target' exists (referenced in router)"
+    fi
+  done <<< "$router_targets"
+fi
 
 # --- Required sections ---
 printf "\n${C_BOLD}Required sections${C_RESET}\n"

@@ -151,6 +151,13 @@ if [[ -f "$AIDER_OUT" ]]; then
   else
     pass "Aider CONVENTIONS.md does not contain SKILL.md 'name:' field"
   fi
+
+  # Verify body starts with expected content (not just a blank or garbled file)
+  if head -3 "$AIDER_OUT" | grep -q "Requires:.*op.*CLI"; then
+    pass "Aider output body starts with expected content"
+  else
+    fail "Aider output body does not start with expected content (possible strip_frontmatter bug)"
+  fi
 fi
 
 # --- Windsurf .windsurfrules: no YAML frontmatter ---
@@ -168,6 +175,13 @@ if [[ -f "$WINDSURF_OUT" ]]; then
     fail "Windsurf .windsurfrules must not contain SKILL.md 'name:' field"
   else
     pass "Windsurf .windsurfrules does not contain SKILL.md 'name:' field"
+  fi
+
+  # Verify body starts with expected content (not just a blank or garbled file)
+  if head -3 "$WINDSURF_OUT" | grep -q "Requires:.*op.*CLI"; then
+    pass "Windsurf output body starts with expected content"
+  else
+    fail "Windsurf output body does not start with expected content (possible strip_frontmatter bug)"
   fi
 fi
 

@@ -63,8 +63,8 @@ for i in "${!SUITE_NAMES[@]}"; do
   start_time=$(date +%s%N 2>/dev/null || date +%s)
 
   # Run suite, capture output and exit code
-  suite_output=$(NO_COLOR="${NO_COLOR:-}" "$script" 2>&1) || true
-  exit_code=$?
+  exit_code=0
+  suite_output=$(NO_COLOR="${NO_COLOR:-}" "$script" 2>&1) || exit_code=$?
 
   end_time=$(date +%s%N 2>/dev/null || date +%s)
 

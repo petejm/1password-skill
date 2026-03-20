@@ -95,12 +95,12 @@ fi
 # --- 1Password item IDs (26-char alphanumeric) ---
 printf "\n${C_BOLD}No 1Password item IDs${C_RESET}\n"
 
-# 1P item IDs are exactly 26 lowercase alphanumeric chars
-op_id_matches=$(scan_files '\b[a-z0-9]{26}\b' || true)
+# 1P item IDs are exactly 26 alphanumeric chars (mixed case)
+op_id_matches=$(scan_files '\b[a-zA-Z0-9]{26}\b' || true)
 if [[ -z "$op_id_matches" ]]; then
-  pass "No 1Password item IDs (26-char alphanumeric) found"
+  pass "No 1Password item IDs (26-char alphanumeric, mixed case) found"
 else
-  fail "No 1Password item IDs (26-char alphanumeric) found"
+  fail "No 1Password item IDs (26-char alphanumeric, mixed case) found"
   echo "$op_id_matches" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       %s\n" "$line"; done
 fi
 
@@ -196,16 +196,17 @@ fi
 # --- op:// references use only placeholder names ---
 printf "\n${C_BOLD}op:// references use placeholder names only${C_RESET}\n"
 
-# Allowed: VaultName, ItemName, Vault, Item, Production, Private, ExternalAPI, PostgreSQL,
+# Allowed: VaultName, ItemName, Vault, MyVault, DevVault, ExternalAPI, PostgreSQL,
 #          GitHub, fieldname, credential, field, username, password, key, connection-string, token
-# Disallowed: real vault/item names that look like personal infrastructure
+# Disallowed: Production and Private (real vault names people use), and anything that looks like personal infrastructure
 op_refs=$(scan_files 'op://[A-Za-z]' || true)
 # Check if any op:// reference uses what looks like a real vault name.
-# Allowed: VaultName, Vault, Production, Private, ExternalAPI, Item, GitHub, PostgreSQL, Field (PascalCase placeholders)
+# Allowed: VaultName, Vault, MyVault, DevVault, ExternalAPI, Item, ItemName, GitHub, PostgreSQL, Field (clearly-fake placeholders)
 # Also allow: op://vault/item/field (the generic all-lowercase documentation placeholder)
+# Disallowed: Production and Private — these are real vault names people commonly use
 suspicious_op=$(echo "$op_refs" | \
   grep -E 'op://[A-Za-z]' | \
-  grep -vE 'op://(VaultName|Vault|Production|Private|ExternalAPI|ItemName|Item|GitHub|PostgreSQL|Field)/' | \
+  grep -vE 'op://(VaultName|Vault|MyVault|DevVault|ExternalAPI|ItemName|Item|GitHub|PostgreSQL|Field)/' | \
   grep -vE 'op://vault/item/field' || true)
 if [[ -z "$suspicious_op" ]]; then
   pass "op:// references use placeholder vault/item names"
