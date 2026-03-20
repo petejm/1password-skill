@@ -1,0 +1,12 @@
+{
+  "name": "1password-skill",
+  "description": "Claude Code skill for 1Password CLI — auth recovery, secret retrieval, SSH agent, git signing, and troubleshooting",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "1password",
+      "path": "skills/1password/SKILL.md",
+      "description": "Interact with 1Password CLI (op) — auth recovery, secret retrieval, SSH agent, git commit signing, and troubleshooting"
+    }
+  ]
+}
