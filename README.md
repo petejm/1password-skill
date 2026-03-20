@@ -52,11 +52,16 @@ Then exit and re-open Claude Code. The skill activates automatically when you me
 ### Gemini CLI
 
 ```bash
-# Copy the skill to your project
-cp -r integrations/gemini-cli/skills/1password ~/.gemini/skills/1password
+# Copy the skill to your Gemini skills directory
+mkdir -p ~/.gemini/skills
+cp -r integrations/gemini-cli/skills/1password ~/.gemini/skills/
 ```
 
-Or clone the repo and symlink: `ln -s /path/to/1password-skill/integrations/gemini-cli/skills/1password ~/.gemini/skills/1password`
+Or clone the repo and symlink:
+```bash
+mkdir -p ~/.gemini/skills
+ln -s /path/to/1password-skill/integrations/gemini-cli/skills/1password ~/.gemini/skills/
+```
 
 ### Cursor
 

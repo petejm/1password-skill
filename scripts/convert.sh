@@ -29,9 +29,27 @@ strip_frontmatter() {
 }
 
 # Extract description from YAML frontmatter
+# Handles both single-line (description: "text") and multiline block scalar (description: |)
 get_description() {
-  # Get the first line of the description field, strip leading whitespace
-  awk '/^---/{f++} f==1 && /^description:/{sub(/^description:[[:space:]]*/,""); gsub(/^"|"$/,""); if(/\|/) next; print; exit} f==1 && /^  / && p{sub(/^[[:space:]]*/,""); print; exit} /^description:/{p=1}' "$1"
+  local file="$1"
+  awk '
+    /^---/{f++}
+    f==1 && /^description:/ {
+      if (/\|/) {
+        # Multiline block scalar — grab the first non-empty indented line
+        while ((getline line) > 0) {
+          gsub(/^[[:space:]]+/, "", line)
+          if (line != "") { print line; exit }
+        }
+      } else {
+        # Single-line: description: "text" or description: text
+        sub(/^description:[[:space:]]*/, "")
+        gsub(/^"|"$/, "")
+        print
+        exit
+      }
+    }
+  ' "$file"
 }
 
 convert_gemini_cli() {
@@ -44,9 +62,11 @@ convert_gemini_cli() {
 convert_cursor() {
   local out="$OUT_BASE/cursor/.cursor/rules"
   mkdir -p "$out"
+  local desc
+  desc="$(get_description "$SOURCE_SKILL")"
   {
     echo "---"
-    echo "description: \"1Password CLI — auth recovery, secret retrieval, SSH agent, git signing, troubleshooting\""
+    echo "description: \"$desc\""
     echo 'globs: ""'
     echo "alwaysApply: true"
     echo "---"
