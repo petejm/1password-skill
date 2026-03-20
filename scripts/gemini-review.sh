@@ -2,7 +2,7 @@
 # gemini-review.sh — Run tabula rasa reviews via Gemini API
 #
 # Usage:
-#   op run --env-file=<(echo 'GEMINI_API_KEY=op://Private/Gemini API Key/credential') -- \
+#   op run --env-file=<(echo 'GEMINI_API_KEY=op://YourVault/Gemini API Key/credential') -- \
 #     ./scripts/gemini-review.sh [--reviewer <name>] [--model <model>] [--all]
 #
 # Reviewers: swe, security, devrel (default: swe)
@@ -42,11 +42,11 @@ Options:
 Prerequisites:
   GEMINI_API_KEY must be set. Use 1Password to inject it:
 
-  op run --env-file=<(echo 'GEMINI_API_KEY=op://Private/Gemini API Key/credential') -- \
+  op run --env-file=<(echo 'GEMINI_API_KEY=op://YourVault/Gemini API Key/credential') -- \
     ./scripts/gemini-review.sh --all
 
   Fish shell:
-  op run --env-file=(echo 'GEMINI_API_KEY=op://Private/Gemini API Key/credential' | psub) -- \
+  op run --env-file=(echo 'GEMINI_API_KEY=op://YourVault/Gemini API Key/credential' | psub) -- \
     ./scripts/gemini-review.sh --all
 EOF
 }
@@ -65,7 +65,7 @@ done
 # Validate API key
 if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   echo "Error: GEMINI_API_KEY not set. Use op run to inject it:"
-  echo '  op run --env-file=<(echo '"'"'GEMINI_API_KEY=op://Private/Gemini API Key/credential'"'"') -- ./scripts/gemini-review.sh'
+  echo '  op run --env-file=<(echo '"'"'GEMINI_API_KEY=op://YourVault/Gemini API Key/credential'"'"') -- ./scripts/gemini-review.sh'
   exit 1
 fi
 

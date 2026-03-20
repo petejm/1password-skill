@@ -206,7 +206,7 @@ op_refs=$(scan_files 'op://[A-Za-z]' || true)
 # Disallowed: Production and Private — these are real vault names people commonly use
 suspicious_op=$(echo "$op_refs" | \
   grep -E 'op://[A-Za-z]' | \
-  grep -vE 'op://(VaultName|Vault|MyVault|DevVault|ExternalAPI|ItemName|Item|GitHub|PostgreSQL|Field)/' | \
+  grep -vE 'op://(VaultName|Vault|MyVault|DevVault|YourVault|ExternalAPI|ItemName|Item|GitHub|PostgreSQL|Field)/' | \
   grep -vE 'op://vault/item/field' || true)
 if [[ -z "$suspicious_op" ]]; then
   pass "op:// references use placeholder vault/item names"
