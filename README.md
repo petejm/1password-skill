@@ -40,12 +40,60 @@ The skill enforces 6 rules that align with [1Password's own AI guidance](https:/
 
 ## Install
 
+### Claude Code
+
 ```bash
 mkdir -p ~/.claude/plugins
 git clone https://github.com/petejm/1password-skill.git ~/.claude/plugins/1password-skill
 ```
 
 Then exit and re-open Claude Code. The skill activates automatically when you mention 1Password, `op` CLI, SSH auth issues, or secret references.
+
+### Gemini CLI
+
+```bash
+# Copy the skill to your project
+cp -r integrations/gemini-cli/skills/1password ~/.gemini/skills/1password
+```
+
+Or clone the repo and symlink: `ln -s /path/to/1password-skill/integrations/gemini-cli/skills/1password ~/.gemini/skills/1password`
+
+### Cursor
+
+```bash
+# Copy the rule to your project
+cp integrations/cursor/.cursor/rules/1password.mdc .cursor/rules/1password.mdc
+```
+
+The rule is set to `alwaysApply: true` so it loads automatically in every conversation.
+
+### Aider
+
+```bash
+# Copy to your project root
+cp integrations/aider/CONVENTIONS.md .aider/CONVENTIONS.md
+```
+
+Aider loads `CONVENTIONS.md` automatically at session start.
+
+### Windsurf
+
+```bash
+# Copy to your project root
+cp integrations/windsurf/.windsurfrules .windsurfrules
+```
+
+Windsurf loads `.windsurfrules` automatically.
+
+### Regenerating integrations
+
+If you modify `skills/1password/SKILL.md`, regenerate all integration formats:
+
+```bash
+./scripts/convert.sh
+```
+
+Or target a specific tool: `./scripts/convert.sh --tool cursor`
 
 ## Requirements
 
