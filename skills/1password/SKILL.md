@@ -185,7 +185,7 @@ Copy public key from 1Password desktop app → SSH key item → public key field
 
 ## Error Catalog
 
-```
+```text
 "Permission denied (publickey)"
 → 1Password locked or SSH agent not configured
 → Fix: `op whoami` (triggers biometric), `ssh-add -l` to verify keys loaded
