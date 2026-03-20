@@ -25,7 +25,7 @@ Gives Claude a **decision router** — a lookup table that maps what you're seei
 | Setting up `op://` references | Guide you through `.env` templates and `op inject` |
 | SSH agent not responding | Check socket paths per OS, verify with `ssh-add -l` |
 | Git commit signing failures | Configure `op-ssh-sign` with the right paths |
-| Any of 11 common `op` errors | Match the exact error → cause → fix |
+| Common `op` errors | Match the exact error → cause → fix |
 
 ### Security-First Design
 
@@ -41,10 +41,11 @@ The skill enforces 6 rules that align with [1Password's own AI guidance](https:/
 ## Install
 
 ```bash
+mkdir -p ~/.claude/plugins
 git clone https://github.com/petejm/1password-skill.git ~/.claude/plugins/1password-skill
 ```
 
-Then restart Claude Code. The skill activates automatically when you mention 1Password, `op` CLI, SSH auth issues, or secret references.
+Then exit and re-open Claude Code. The skill activates automatically when you mention 1Password, `op` CLI, SSH auth issues, or secret references.
 
 ## Requirements
 
@@ -66,13 +67,13 @@ op run --env-file=(echo "KEY=op://Vault/Item/field" | psub) -- ./app
 
 ## Environment Overrides
 
-Projects often have specific 1Password configuration — device-specific socket paths, security hook conflicts, infrastructure credentials. Create a sibling file to customize:
+If your project has specific 1Password configuration (device socket paths, hook conflicts, infrastructure patterns), create an `environment.md` file alongside the installed skill:
 
 ```
-skills/1password/environment.md    # your project-specific overrides
+~/.claude/plugins/1password-skill/skills/1password/environment.md
 ```
 
-This keeps the public skill generic while letting each project add its own context. Claude reads both files when the skill activates.
+Claude reads both files when the skill activates — the generic skill plus your project-specific context. This file is gitignored by default to prevent committing sensitive configuration.
 
 ## How It Works
 

@@ -57,7 +57,6 @@ Should list keys. "Could not open connection" → `SSH_AUTH_SOCK` not set. Set i
 **Multi-account:** If `op whoami` returns the wrong account:
 ```bash
 op whoami --account my.1password.com
-op signin --account my.1password.com
 op account list  # list all configured accounts
 ```
 
@@ -86,15 +85,17 @@ Note: `--fields password` without `label=` may return wrong field. Use `label=fi
 
 **Basic auth** (username+password, not token) — never use `curl -u` (mangles special chars):
 ```bash
-USER=$(op item get "ItemName" --vault "VaultName" --fields label=username --reveal)
+OP_USER=$(op item get "ItemName" --vault "VaultName" --fields label=username --reveal)
 PASS=$(op item get "ItemName" --vault "VaultName" --fields label=password --reveal)
 HOST="api.example.com"
 # <(...) creates a file descriptor, not a disk file — no cleanup needed
-curl -s --netrc-file <(echo "machine $HOST login $USER password $PASS") \
+curl -s --netrc-file <(echo "machine $HOST login $OP_USER password $PASS") \
   "https://$HOST/api/endpoint"
 ```
 
-> **Fish shell:** Use `(echo "machine $HOST login $USER password $PASS" | psub)` instead of `<(...)`.
+> **Fish shell:** Use `(echo "machine $HOST login $OP_USER password $PASS" | psub)` instead of `<(...)`.
+
+> **Note:** Fish's `psub` creates a temporary file in `/tmp` (unlike bash's `<(...)` which uses an anonymous pipe). The file is cleaned up automatically but briefly exists on disk. For sensitive credentials, prefer `op run` with an `.env.tpl` file instead.
 
 ## Config File Patterns
 
@@ -114,6 +115,7 @@ op run --env-file=.env.tpl -- ./start-server
 # 2. op inject for config file templating
 # config.yml.tpl contains: api_key: "{{ op://Vault/Item/field }}"
 op inject -i config.yml.tpl -o config.yml
+# WARNING: config.yml now contains live secrets — add to .gitignore, delete after use
 
 # 3. op read for single exported values
 export TOKEN=$(op read "op://Vault/Item/field")
@@ -231,6 +233,9 @@ Copy public key from 1Password desktop app → SSH key item → public key field
 
 ## Troubleshooting
 
+**`op` not found / not installed:**
+Install from https://developer.1password.com/docs/cli/. After install, enable CLI integration: 1Password desktop → Settings → Developer → "Integrate with 1Password CLI". Verify: `op --version`.
+
 **op hangs / no biometric prompt:**
 Prompt appears on the desktop, not in the terminal. On Linux/Wayland: check all workspaces. If hung 30s+: Ctrl+C, restart 1Password app, retry.
 
@@ -246,7 +251,7 @@ Auto-locks after inactivity (10-30 min typical). SSH fails silently with "Permis
 **Shell plugin conflicts:**
 1Password shell plugins for `gh` etc. don't work non-interactively (no biometric prompt). Disable in Claude sessions:
 ```bash
-if [[ -z "$CLAUDE_SESSION" ]]; then
+if [[ -z "$CLAUDECODE" ]]; then
   alias gh="op plugin run -- gh"
 fi
 ```
