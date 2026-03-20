@@ -82,7 +82,29 @@ The decision-router pattern means Claude doesn't have to read the entire documen
 
 ## Contributing
 
-Issues and PRs welcome. The skill is a single markdown file at `skills/1password/SKILL.md` — easy to read, review, and extend.
+Issues and PRs welcome! The skill is a single markdown file at `skills/1password/SKILL.md` — no build step, no dependencies, easy to read and review.
+
+### What makes a good contribution
+
+- **New error catalog entries** — hit a confusing `op` error that isn't listed? Add the error message, cause, and fix
+- **Shell variants** — we cover bash/zsh and Fish, but other shells (nushell, PowerShell) are welcome
+- **Platform-specific fixes** — Windows/WSL paths, NixOS quirks, container gotchas
+- **Security improvements** — better patterns for minimizing credential exposure
+- **Workflow patterns** — common `op` usage patterns (CI/CD, MCP servers, Docker) that others would benefit from
+
+### How to contribute
+
+1. Fork the repo
+2. Edit `skills/1password/SKILL.md` (or `plugin.json` if adding new skill files)
+3. Test by cloning your fork into `~/.claude/plugins/1password-skill` and verifying Claude picks up the changes
+4. Open a PR with a clear description of the problem your change solves
+
+### Guidelines
+
+- Keep the decision-router table updated if you add new sections
+- Include both bash/zsh and Fish examples for any new code blocks that use process substitution
+- Error catalog entries follow the format: `"error message"` → cause → `Fix: command`
+- No real credentials, vault names, or infrastructure details in examples — use placeholders like `VaultName`, `ItemName`
 
 ## License
 
