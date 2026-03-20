@@ -40,4 +40,4 @@ If your project has specific 1Password configuration (device socket paths, hook 
 
 ## License
 
-MIT
+Apache 2.0
