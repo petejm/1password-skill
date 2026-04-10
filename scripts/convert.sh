@@ -36,11 +36,20 @@ get_description() {
     /^---/{f++}
     f==1 && /^description:/ {
       if (/\|/) {
-        # Multiline block scalar — grab the first non-empty indented line
+        # Multiline block scalar — collect all indented lines until dedent or end of frontmatter
+        result = ""
         while ((getline line) > 0) {
-          gsub(/^[[:space:]]+/, "", line)
-          if (line != "") { print line; exit }
+          if (line ~ /^---/) break
+          if (line ~ /^[^[:space:]]/ && line != "") break
+          stripped = line
+          gsub(/^[[:space:]]+/, "", stripped)
+          if (stripped != "") {
+            if (result != "") result = result " "
+            result = result stripped
+          }
         }
+        print result
+        exit
       } else {
         # Single-line: description: "text" or description: text
         sub(/^description:[[:space:]]*/, "")
@@ -66,7 +75,7 @@ convert_cursor() {
   desc="$(get_description "$SOURCE_SKILL")"
   {
     echo "---"
-    echo "description: \"$desc\""
+    echo "description: \"${desc//\"/\'}\""
     echo 'globs: ""'
     echo "alwaysApply: true"
     echo "---"

@@ -51,19 +51,23 @@ Then exit and re-open Claude Code. The skill activates automatically when you me
 
 ### Gemini CLI
 
+After cloning this repo:
+
 ```bash
 # Copy the skill to your Gemini skills directory
 mkdir -p ~/.gemini/skills
 cp -r integrations/gemini-cli/skills/1password ~/.gemini/skills/
 ```
 
-Or clone the repo and symlink:
+Or symlink directly:
 ```bash
 mkdir -p ~/.gemini/skills
 ln -s /path/to/1password-skill/integrations/gemini-cli/skills/1password ~/.gemini/skills/
 ```
 
 ### Cursor
+
+After cloning this repo:
 
 ```bash
 # Copy the rule to your project
@@ -74,14 +78,18 @@ The rule is set to `alwaysApply: true` so it loads automatically in every conver
 
 ### Aider
 
+After cloning this repo:
+
 ```bash
 # Copy to your project root
-cp integrations/aider/CONVENTIONS.md .aider/CONVENTIONS.md
+cp integrations/aider/CONVENTIONS.md ./CONVENTIONS.md
 ```
 
-Aider loads `CONVENTIONS.md` automatically at session start.
+Aider loads `CONVENTIONS.md` from the project root automatically at session start.
 
 ### Windsurf
+
+After cloning this repo:
 
 ```bash
 # Copy to your project root
@@ -99,6 +107,8 @@ If you modify `skills/1password/SKILL.md`, regenerate all integration formats:
 ```
 
 Or target a specific tool: `./scripts/convert.sh --tool cursor`
+
+Valid `--tool` values: `gemini-cli`, `cursor`, `aider`, `windsurf`, `all`
 
 ## Requirements
 

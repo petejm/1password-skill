@@ -3,3 +3,5 @@
 *~
 skills/*/environment.md
 *.env
+.idea/
+.vscode/

@@ -44,8 +44,8 @@ Should list keys. "Could not open connection" → `SSH_AUTH_SOCK` not set. Set i
 
 **Multi-account:** If `op whoami` returns the wrong account:
 ```bash
-op whoami --account my.1password.com
 op account list  # list all configured accounts
+eval $(op signin --account my.1password.com)  # switch active account
 ```
 
 ## Runtime Access
@@ -75,6 +75,7 @@ Note: `--fields password` without `label=` may return wrong field. Use `label=fi
 ```bash
 OP_USER=$(op item get "ItemName" --vault "VaultName" --fields label=username --reveal)
 PASS=$(op item get "ItemName" --vault "VaultName" --fields label=password --reveal)
+# Warning: OP_USER and PASS persist in the shell environment for the session — run `unset OP_USER PASS` after use or wrap in a subshell.
 HOST="api.example.com"
 # <(...) creates a file descriptor, not a disk file — no cleanup needed
 curl -s --netrc-file <(echo "machine $HOST login $OP_USER password $PASS") \
@@ -88,6 +89,8 @@ curl -s --netrc-file <(echo "machine $HOST login $OP_USER password $PASS") \
 ## Config File Patterns
 
 The `op://` URI format: `op://vault/item/field`
+
+Vault, item, and field names are case-sensitive and must match exactly as stored in 1Password. Use right-click → Copy Secret Reference in the desktop app to get the exact reference.
 
 These references are safe to commit — they contain no secrets. Resolution happens at runtime.
 
@@ -107,6 +110,7 @@ op inject -i config.yml.tpl -o config.yml
 
 # 3. op read for single exported values
 export TOKEN=$(op read --no-newline "op://Vault/Item/field")
+# Warning: TOKEN persists in the shell environment for the session — run `unset TOKEN` after use.
 ```
 
 **MCP server pattern:** `.env` with `op://` references, safe to commit:
@@ -141,9 +145,11 @@ set -gx SSH_AUTH_SOCK ~/.1password/agent.sock        # Linux
 
 Best practice: set `SSH_AUTH_SOCK` in your shell profile (`~/.bashrc`, `~/.zshrc`, `config.fish`), not per-command. This prevents conflicts with security hooks that block commands containing `.1password/` paths.
 
-**SSH config** (`~/.ssh/config`): `IdentityAgent ~/.1password/agent.sock`
+**SSH config** (`~/.ssh/config`):
+- Linux: `IdentityAgent ~/.1password/agent.sock`
+- macOS: `IdentityAgent ~/.ssh/1password-agent.sock`
 
-**Health check:** `ssh-add -l` (lists keys); `ssh -T git@github.com 2>&1 || true`
+**Health check:** `ssh-add -l` (should list your keys); `ssh -T git@github.com 2>&1 || true` (should print "Hi <username>! You've successfully authenticated...")
 
 "Could not open connection": check `$SSH_AUTH_SOCK`, confirm app is running, `op whoami` to unlock.
 
@@ -159,6 +165,7 @@ git config --global user.signingkey "ssh-ed25519 AAAA..."  # your public key
 git config --global commit.gpgsign true
 git config --global gpg.ssh.program "/opt/1Password/op-ssh-sign"         # Linux
 # macOS: "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
+# Flatpak/Snap installs: path differs — check with `which op-ssh-sign`
 ```
 
 Copy public key from 1Password desktop app → SSH key item → public key field. Register as a **signing key** on GitHub/GitLab/Forgejo (separate from auth keys).
@@ -228,10 +235,10 @@ Install from https://developer.1password.com/docs/cli/. After install, enable CL
 Prompt appears on the desktop, not in the terminal. On Linux/Wayland: check all workspaces. If hung 30s+: Ctrl+C, restart 1Password app, retry.
 
 **op fails in Claude Code sandbox:**
-Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Workaround (issue #23642): run `op` in your shell before starting Claude, or use `op run` to inject secrets before the session.
+Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Fix: `sudo usermod -aG onepassword-cli $(whoami)` then logout/login. Alternative: use `op run` to inject secrets before launching Claude so the session inherits them without needing `op` to run inside the sandbox.
 
 **Wrong account:**
-`op whoami` → shows active account. Switch: `op whoami --account my.1password.com`. List: `op account list`.
+`op whoami` → shows active account. List: `op account list`. Switch: `eval $(op signin --account my.1password.com)`. Use `--account` flag on subsequent commands to target a specific account without switching.
 
 **1Password locked mid-session:**
 Auto-locks after inactivity (10-30 min typical). SSH fails silently with "Permission denied." Fix: `op whoami` to re-unlock, then retry. Prevention: Settings → Security → Auto-lock.
