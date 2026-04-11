@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-04-10
+
+### Fixed
+- Replace `op whoami` with `op account get` as primary auth health check
+- `op whoami` is broken in system-auth mode (1Password desktop app integration, op v2.30+): returns "not signed in" even when the desktop app is unlocked and all other `op` commands work
+- Root cause: `op whoami` checks `config.latest_signin` (empty in system-auth mode) while all other commands use `system_auth_latest_signin` via the daemon socket
+- `op whoami` retained as fallback note for CLI-only users who use `op signin` manually
+
 ## [1.0.1] - 2026-04-09
 
 ### Fixed
@@ -51,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vault name sanitization in `gemini-review.sh`
 - Dynamic Cursor description extraction from multiline YAML block scalars; corrected Gemini CLI install path in README
 
-[Unreleased]: https://github.com/petejm/1password-skill/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/petejm/1password-skill/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/petejm/1password-skill/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/petejm/1password-skill/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/petejm/1password-skill/releases/tag/v1.0.0

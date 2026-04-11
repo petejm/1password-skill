@@ -30,9 +30,11 @@ The most common use case: SSH or git operations fail with auth errors after 1Pas
 
 **Step 1: Trigger biometric unlock**
 ```bash
-op whoami
+op account get
 ```
 Prompts appear on the desktop (NOT in the terminal). Wait for user to approve.
+
+Note: `op whoami` is broken in system-auth mode (1Password desktop app integration, op v2.30+). It returns "not signed in" even when the app is unlocked. Use `op account get` instead; it routes through the desktop app daemon and works reliably.
 
 **Step 2: Verify SSH agent is alive**
 ```bash
@@ -42,7 +44,7 @@ Should list keys. "Could not open connection" → `SSH_AUTH_SOCK` not set. Set i
 
 **Step 3: Retry the failed operation** (git push, ssh, etc.)
 
-**Multi-account:** If `op whoami` returns the wrong account:
+**Multi-account:** If `op account get` (or `op whoami` if `op whoami` fails; see note above) returns the wrong account:
 ```bash
 op account list  # list all configured accounts
 eval $(op signin --account my.1password.com)  # switch active account
@@ -151,7 +153,7 @@ Best practice: set `SSH_AUTH_SOCK` in your shell profile (`~/.bashrc`, `~/.zshrc
 
 **Health check:** `ssh-add -l` (should list your keys); `ssh -T git@github.com 2>&1 || true` (should print "Hi <username>! You've successfully authenticated...")
 
-"Could not open connection": check `$SSH_AUTH_SOCK`, confirm app is running, `op whoami` to unlock.
+"Could not open connection": check `$SSH_AUTH_SOCK`, confirm app is running, `op account get` to verify auth.
 
 ## Git Signing
 
@@ -173,17 +175,17 @@ Copy public key from 1Password desktop app → SSH key item → public key field
 **Verify:** `git log --show-signature -1`
 
 **Common errors:**
-- "Couldn't find key in agent" → `op whoami` to unlock, `ssh-add -l` to confirm
+- "Couldn't find key in agent" → `op account get` to verify auth, `ssh-add -l` to confirm
 - "Load key ... invalid format" → wrong key type or corrupted `user.signingkey`
 - "Unverified" on GitHub → signing key not registered, or `user.email` mismatch
-- Signing fails despite `op whoami` working → check `gpg.ssh.program` path (differs by OS)
+- Signing fails despite `op account get` working → check `gpg.ssh.program` path (differs by OS)
 
 ## Error Catalog
 
 ```text
 "Permission denied (publickey)"
 → 1Password locked or SSH agent not configured
-→ Fix: `op whoami` (triggers biometric), `ssh-add -l` to verify keys loaded
+→ Fix: `op account get` (triggers biometric), `ssh-add -l` to verify keys loaded
 
 "Could not open a connection to your authentication agent"
 → SSH_AUTH_SOCK not set or wrong socket
@@ -195,7 +197,7 @@ Copy public key from 1Password desktop app → SSH key item → public key field
 
 "op: session expired"
 → Desktop app locked or timed out
-→ Fix: `op whoami` (re-auth), retry command
+→ Fix: `op account get` (re-auth), retry command
 
 "op: [ERROR] no account found"
 → op CLI not configured
@@ -211,7 +213,7 @@ Copy public key from 1Password desktop app → SSH key item → public key field
 
 "sign_and_send_pubkey: signing failed ... agent refused operation"
 → Biometric denied or 1Password not running
-→ Fix: check for prompt on desktop, restart app, then `op whoami`
+→ Fix: check for prompt on desktop, restart app, then `op account get`
 
 "op: 403 Forbidden"
 → Service account missing vault access
@@ -235,13 +237,13 @@ Install from https://developer.1password.com/docs/cli/. After install, enable CL
 Prompt appears on the desktop, not in the terminal. On Linux/Wayland: check all workspaces. If hung 30s+: Ctrl+C, restart 1Password app, retry.
 
 **op fails in Claude Code sandbox:**
-Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Fix: `sudo usermod -aG onepassword-cli $(whoami)` then logout/login. Alternative: use `op run` to inject secrets before launching Claude so the session inherits them without needing `op` to run inside the sandbox.
+Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Fix: `sudo usermod -aG onepassword-cli $(whoami)` then `source` your shell config (e.g., `source ~/.bashrc`) to pick up the new group. Alternative: use `op run` to inject secrets before launching Claude so the session inherits them without needing `op` to run inside the sandbox.
 
 **Wrong account:**
-`op whoami` → shows active account. List: `op account list`. Switch: `eval $(op signin --account my.1password.com)`. Use `--account` flag on subsequent commands to target a specific account without switching.
+`op account get` → shows active account. For CLI-only mode (no desktop app), `op whoami` also works. List: `op account list`. Switch: `eval $(op signin --account my.1password.com)`. Use `--account` flag on subsequent commands to target a specific account without switching.
 
 **1Password locked mid-session:**
-Auto-locks after inactivity (10-30 min typical). SSH fails silently with "Permission denied." Fix: `op whoami` to re-unlock, then retry. Prevention: Settings → Security → Auto-lock.
+Auto-locks after inactivity (10-30 min typical). SSH fails silently with "Permission denied." Fix: `op account get` to verify auth, then retry. Prevention: Settings → Security → Auto-lock.
 
 **Shell plugin conflicts:**
 1Password shell plugins for `gh` etc. don't work non-interactively (no biometric prompt). Disable in Claude sessions:

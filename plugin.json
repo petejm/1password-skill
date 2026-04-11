@@ -1,7 +1,7 @@
 {
   "name": "1password-skill",
   "description": "Claude Code skill for 1Password CLI — auth recovery, secret retrieval, SSH agent, git signing, and troubleshooting",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Peter McDade",
   "repository": "https://github.com/petejm/1password-skill",
   "skills": [

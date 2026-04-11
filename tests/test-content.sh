@@ -49,7 +49,7 @@ for subcmd in "${invalid_subcmds[@]}"; do
 done
 
 # Valid subcommands that should appear
-valid_subcmds=("op whoami" "op run" "op read" "op item get" "op account list")
+valid_subcmds=("op whoami" "op account get" "op run" "op read" "op item get" "op account list")
 for subcmd in "${valid_subcmds[@]}"; do
   if echo "$skill" | grep -qF "$subcmd"; then
     pass "Valid subcommand '$subcmd' present"

@@ -20,7 +20,7 @@ Gives Claude a **decision router** — a lookup table that maps what you're seei
 
 | You're seeing... | Claude will... |
 |---|---|
-| `Permission denied (publickey)` | Run the auth recovery flow (`op whoami` → biometric → retry) |
+| `Permission denied (publickey)` | Run the auth recovery flow (`op account get` → biometric → retry) |
 | "I need a database password" | Use `op run` to inject it without exposing it in conversation |
 | Setting up `op://` references | Guide you through `.env` templates and `op inject` |
 | SSH agent not responding | Check socket paths per OS, verify with `ssh-add -l` |
