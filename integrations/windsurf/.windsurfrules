@@ -34,7 +34,7 @@ op account get
 ```
 Prompts appear on the desktop (NOT in the terminal). Wait for user to approve.
 
-Note: `op whoami` is broken in system-auth mode (1Password desktop app integration, op v2.30+). It returns "not signed in" even when the app is unlocked. Use `op account get` instead; it routes through the desktop app daemon and works reliably.
+**Important:** Do NOT use `op whoami`. From the agent's perspective, it always fails with "not signed in" even when the desktop app is unlocked and every other `op` command works. This is because `op whoami` checks CLI session state, not the desktop app daemon. `op account get` routes through the daemon and reliably returns account info from agent shell contexts.
 
 **Step 2: Verify SSH agent is alive**
 ```bash
@@ -44,7 +44,7 @@ Should list keys. "Could not open connection" → `SSH_AUTH_SOCK` not set. Set i
 
 **Step 3: Retry the failed operation** (git push, ssh, etc.)
 
-**Multi-account:** If `op account get` returns the wrong account (CLI-only users: `op whoami` also works):
+**Multi-account:** If `op account get` returns the wrong account:
 ```bash
 op account list  # list all configured accounts
 eval $(op signin --account my.1password.com)  # switch active account
@@ -240,7 +240,7 @@ Prompt appears on the desktop, not in the terminal. On Linux/Wayland: check all 
 Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Fix: `sudo usermod -aG onepassword-cli $(whoami)` then `source` your shell config (e.g., `source ~/.bashrc`) to pick up the new group. Alternative: use `op run` to inject secrets before launching Claude so the session inherits them without needing `op` to run inside the sandbox.
 
 **Wrong account:**
-`op account get` → shows active account. For CLI-only mode (no desktop app), `op whoami` also works. List: `op account list`. Switch: `eval $(op signin --account my.1password.com)`. Use `--account` flag on subsequent commands to target a specific account without switching.
+`op account get` → shows active account. List: `op account list`. Switch: `eval $(op signin --account my.1password.com)`. Use `--account` flag on subsequent commands to target a specific account without switching.
 
 **1Password locked mid-session:**
 Auto-locks after inactivity (10-30 min typical). SSH fails silently with "Permission denied." Fix: `op account get` to verify auth, then retry. Prevention: Settings → Security → Auto-lock.
