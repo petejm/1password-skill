@@ -9,7 +9,13 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILL_MD="$REPO_ROOT/skills/1password/SKILL.md"
-PLUGIN_JSON="$REPO_ROOT/plugin.json"
+# plugin.json may live at repo root (legacy) or .claude-plugin/ (current convention,
+# per Claude Code's --plugin-dir auto-discovery). Prefer .claude-plugin/ if present.
+if [[ -f "$REPO_ROOT/.claude-plugin/plugin.json" ]]; then
+  PLUGIN_JSON="$REPO_ROOT/.claude-plugin/plugin.json"
+else
+  PLUGIN_JSON="$REPO_ROOT/plugin.json"
+fi
 
 PASSES=0
 FAILS=0
@@ -109,12 +115,14 @@ fi
 # Extract section names referenced in the router table (→ Section Name)
 # Only look at the Decision Router table — stop at the first ## heading after it.
 # Router rows look like: | ... | → Section Name |
-router_section=$(awk '/^# 1Password CLI — Decision Router/,/^## /' "$SKILL_MD" | head -n -1)
+# Awk's range pattern includes the closing `## ` line; strip it. Use `sed '$d'`
+# instead of `head -n -1` because BSD head (macOS) doesn't support negative counts.
+router_section=$(awk '/^# 1Password CLI [—-] Decision Router/,/^## /' "$SKILL_MD" | sed '$d')
 router_targets=$(echo "$router_section" | grep -E '\| → [A-Za-z]' | grep -oE '→ [A-Za-z][A-Za-z ]+' | sed 's/→ //' | sed 's/[[:space:]]*$//' | sort -u)
 
 printf "\n${C_BOLD}Decision Router → Section mapping${C_RESET}\n"
 if [[ -z "$router_section" ]]; then
-  fail "Decision router section heading not found — expected '# 1Password CLI — Decision Router'"
+  fail "Decision router section heading not found — expected '# 1Password CLI [—-] Decision Router'"
 else
   while IFS= read -r target; do
     # Skip "Error Catalog" as it's a special case checked separately
