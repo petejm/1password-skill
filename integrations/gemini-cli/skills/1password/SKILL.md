@@ -250,7 +250,7 @@ Install from https://developer.1password.com/docs/cli/. After install, enable CL
 Prompt appears on the desktop, not in the terminal. On Linux/Wayland: check all workspaces. If hung 30s+: Ctrl+C, restart 1Password app, retry.
 
 **op fails in Claude Code sandbox:**
-Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Fix: `sudo usermod -aG onepassword-cli $(whoami)` then `source` your shell config (e.g., `source ~/.bashrc`) to pick up the new group. Alternative: use `op run` to inject secrets before launching Claude so the session inherits them without needing `op` to run inside the sandbox.
+Claude Code's bubblewrap sandbox strips setgid bits; `op` requires the `onepassword-cli` group. Symptom: works in terminal but fails as a Claude tool call. Fix: `sudo usermod -aG onepassword-cli $(whoami)`, then log out and log back in (or fully restart your terminal/IDE) so a new login shell picks up the supplementary group — `source ~/.bashrc` will NOT work, since Unix loads supplementary groups via `setgroups()` at login, not from shell config. (`newgrp onepassword-cli` works for the current shell only and does not propagate to other open terminals.) Alternative: use `op run` to inject secrets before launching Claude so the session inherits them without needing `op` to run inside the sandbox.
 
 **Wrong account:**
 `op account get` → shows active account. List: `op account list`. Switch: `eval $(op signin --account my.1password.com)`. Use `--account` flag on subsequent commands to target a specific account without switching.
