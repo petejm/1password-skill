@@ -12,6 +12,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PASSES=0
 FAILS=0
 
+# Floor on the number of assertions this suite must execute. run-all.sh only scrapes
+# "N/M passed" and cannot tell 24/24 from 3/3, so a block that quietly stops running
+# shrinks the denominator invisibly. Keep this EQUAL to the number of assertions the
+# suite actually runs: a floor with slack in it is not a floor. run-all.sh greps this
+# exact assignment out of the file, so keep it on one line with no spaces.
+EXPECTED_MIN_ASSERTIONS=25
+
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
   C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"; C_BOLD="\033[1m"; C_RESET="\033[0m"
@@ -22,17 +29,102 @@ fi
 pass() { PASSES=$((PASSES + 1)); printf "  ${C_GREEN}PASS${C_RESET} %s\n" "$1"; }
 fail() { FAILS=$((FAILS + 1));  printf "  ${C_RED}FAIL${C_RESET} %s\n" "$1"; }
 
+summary_and_exit() {
+  # Enforce the assertion floor on EVERY exit path, including the early
+  # summary_and_exit calls used for missing prerequisites. A floor evaluated only at
+  # the bottom of the file is skipped exactly when the denominator collapses, and
+  # run-all.sh then reports the tiny N/M as a normal result.
+  local _ran=$((PASSES + FAILS + 1))
+  if [[ $_ran -ge $EXPECTED_MIN_ASSERTIONS ]]; then
+    pass "Suite ran $_ran assertions (>= $EXPECTED_MIN_ASSERTIONS expected)"
+  else
+    fail "Suite ran only $_ran assertions (expected >= $EXPECTED_MIN_ASSERTIONS) -- assertion blocks were skipped"
+  fi
+  local total=$((PASSES + FAILS))
+  printf "\n${C_BOLD}Security:${C_RESET} $PASSES/$total passed"
+  if [[ $FAILS -eq 0 ]]; then
+    printf " ${C_GREEN}(all passed)${C_RESET}"
+  else
+    printf " ${C_RED}($FAILS failed)${C_RESET}"
+  fi
+  printf "\n"
+  # Boolean status, not a mod-256 failure count. See test-structural.sh for rationale.
+  if [[ $FAILS -eq 0 ]]; then exit 0; else exit 1; fi
+}
+
 printf "\n${C_BOLD}${C_CYAN}=== Security Tests ===${C_RESET}\n\n"
 
 # Collect all tracked files that are part of the published skill content.
 # Exclude the tests/ directory — test scripts necessarily reference the patterns
 # they scan for and would cause false positives.
-tracked_files=$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard 2>/dev/null | \
-  grep -v '^tests/' | \
-  xargs -I{} sh -c 'test -f "'"$REPO_ROOT"'/{}" && echo "{}"' 2>/dev/null || true)
+#
+# This corpus is a PRECONDITION, not best-effort. Every failure mode of the old
+# `... || true` pipeline (git absent, not a work tree, xargs failure) produced an
+# empty list, and an empty list made every negative scan below report "clean". A
+# secret scanner that silently disables itself is worse than no scanner.
+printf "${C_BOLD}Scan corpus${C_RESET}\n"
 
-# Helper: search all tracked text files for a pattern
-# Returns match lines or empty
+git_ls_status=0
+raw_files=$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard 2>/dev/null) || git_ls_status=$?
+
+if [[ $git_ls_status -ne 0 ]]; then
+  fail "git ls-files failed (exit $git_ls_status) in $REPO_ROOT — cannot build the security scan corpus; refusing to report clean"
+  summary_and_exit
+fi
+
+tracked_files=""
+while IFS= read -r _rel; do
+  [[ -z "$_rel" ]] && continue
+  case "$_rel" in tests/*) continue ;; esac
+  [[ -f "$REPO_ROOT/$_rel" ]] || continue
+  tracked_files="${tracked_files}${_rel}"$'\n'
+done <<< "$raw_files"
+
+corpus_count=$(printf '%s' "$tracked_files" | grep -c '^.' || true)
+[[ "$corpus_count" =~ ^[0-9]+$ ]] || corpus_count=0
+
+if [[ "$corpus_count" -lt 1 ]]; then
+  fail "security scan corpus is empty — git ls-files returned nothing scannable; refusing to report clean"
+  summary_and_exit
+fi
+pass "Security scan corpus is non-empty ($corpus_count files)"
+
+# Partition the corpus into scannable and unscannable ONCE, up front, and account for
+# every file. The old code made this decision per-file inside scan_files with
+# `file "$abs" | grep -q text || continue`: a single tracked file that `file` did not
+# call "text" (anything containing a NUL byte is classified "data") was then scanned by
+# NOTHING, silently, in a repo whose secret scan is a shipped guarantee. The canary
+# below only ever proved that at least ONE file was read, so it cannot see a one-file
+# skip -- and a one-file skip is the leaking case.
+#
+# `grep -Iq .` is POSIX-portable binary detection built into grep itself (BSD and GNU
+# alike), so the skip decision is made by the same tool, on the same bytes, that does
+# the searching. An empty file has no lines to match and is not binary; treat it as
+# scannable (there is nothing in it to leak).
+scannable_files=""
+skipped_files=""
+scannable_count=0
+skipped_count=0
+while IFS= read -r _rel; do
+  [[ -z "$_rel" ]] && continue
+  if [[ ! -s "$REPO_ROOT/$_rel" ]] || grep -Iq . "$REPO_ROOT/$_rel" 2>/dev/null; then
+    scannable_files="${scannable_files}${_rel}"$'\n'
+    scannable_count=$((scannable_count + 1))
+  else
+    skipped_files="${skipped_files}${_rel}"$'\n'
+    skipped_count=$((skipped_count + 1))
+  fi
+done <<< "$tracked_files"
+
+if [[ "$scannable_count" -eq "$corpus_count" ]]; then
+  pass "All $corpus_count corpus files are scannable text (0 skipped)"
+else
+  fail "$skipped_count of $corpus_count corpus files are not scannable text and would be searched by nothing — the scans below do not cover them"
+  printf '%s' "$skipped_files" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       %s\n" "$line"; done
+fi
+
+# Helper: search every scannable file for a pattern.
+# Returns match lines or empty.
 scan_files() {
   local pattern="$1"
   local exclude_pattern="${2:-__NO_EXCLUDE__}"
@@ -41,8 +133,6 @@ scan_files() {
     [[ -z "$rel_path" ]] && continue
     local abs="$REPO_ROOT/$rel_path"
     [[ -f "$abs" ]] || continue
-    # Skip binary files
-    file "$abs" 2>/dev/null | grep -q "text" || continue
     local found
     found=$(grep -nE "$pattern" "$abs" 2>/dev/null || true)
     if [[ -n "$found" && "$exclude_pattern" != "__NO_EXCLUDE__" ]]; then
@@ -51,12 +141,25 @@ scan_files() {
     if [[ -n "$found" ]]; then
       matches+="$rel_path: $found"$'\n'
     fi
-  done <<< "$tracked_files"
+  done <<< "$scannable_files"
   echo "$matches"
 }
 
+# --- Scanner canary ---
+# Every assertion below trusts an EMPTY result as "clean". Prove the scanner actually
+# reads file contents first by searching for a string that is certain to be present.
+# This is a floor, not a coverage proof: it shows at least ONE file was read. Coverage
+# is what the scannable-vs-corpus count above asserts.
+canary_hits=$(scan_files '1Password' || true)
+if [[ -n "$canary_hits" ]]; then
+  pass "Scanner canary: known string '1Password' found in the corpus (scanner is reading files)"
+else
+  fail "Scanner canary FAILED: '1Password' not found in any of $scannable_count scannable files — the scanner is reading nothing; every clean result below would be meaningless"
+  summary_and_exit
+fi
+
 # --- IP addresses ---
-printf "${C_BOLD}No real IP addresses${C_RESET}\n"
+printf "\n${C_BOLD}No real IP addresses${C_RESET}\n"
 
 # Match IPv4 pattern, exclude localhost, link-local, documentation ranges, and placeholder examples
 ip_matches=$(scan_files \
@@ -95,8 +198,10 @@ fi
 # --- 1Password item IDs (26-char alphanumeric) ---
 printf "\n${C_BOLD}No 1Password item IDs${C_RESET}\n"
 
-# 1P item IDs are exactly 26 alphanumeric chars (mixed case)
-op_id_matches=$(scan_files '\b[a-zA-Z0-9]{26}\b' || true)
+# 1P item IDs are exactly 26 alphanumeric chars (mixed case).
+# \b is a GNU extension with no portable ERE equivalent (BSD grep treats it as a
+# literal 'b'), so anchor on surrounding context instead.
+op_id_matches=$(scan_files '(^|[^a-zA-Z0-9])[a-zA-Z0-9]{26}([^a-zA-Z0-9]|$)' || true)
 if [[ -z "$op_id_matches" ]]; then
   pass "No 1Password item IDs (26-char alphanumeric, mixed case) found"
 else
@@ -107,16 +212,23 @@ fi
 # --- Real usernames ---
 printf "\n${C_BOLD}No real usernames in skill content${C_RESET}\n"
 
-# pmcdade and petejm should only appear in LICENSE copyright and README git clone URL
+# pmcdade and petejm should only appear as public publishing identifiers: the LICENSE
+# copyright line, the GitHub clone/repo URL, and the plugin marketplace name used in the
+# documented install commands. Those last forms are load-bearing — a marketplace plugin
+# cannot be installed without naming its owner — so they are allowlisted by their exact
+# shape, not by a bare `grep -v <username>`. A leak in any other shape (a /home/<user>/
+# path, an email, a vault or account name) still fails this assertion.
 for username in "pmcdade" "petejm"; do
   all_matches=$(scan_files "$username" || true)
-  # Filter out expected occurrences: LICENSE copyright line, README clone URL
   unexpected=$(echo "$all_matches" | \
     grep -v "LICENSE" | \
     grep -v "git clone.*github.com" | \
-    grep -v "github.com/$username" || true)
+    grep -v "github.com/$username" | \
+    grep -v "\"name\": \"$username-plugins\"" | \
+    grep -v "plugin marketplace add $username/1password-skill" | \
+    grep -v "plugin install 1password-skill@$username-plugins" || true)
   if [[ -z "$unexpected" ]]; then
-    pass "Username '$username' only in expected locations (LICENSE, README clone URL)"
+    pass "Username '$username' only in expected locations (LICENSE, repo URL, marketplace id)"
   else
     fail "Username '$username' found in unexpected locations"
     echo "$unexpected" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       %s\n" "$line"; done
@@ -231,13 +343,19 @@ printf "\n${C_BOLD}.gitignore blocks sensitive files${C_RESET}\n"
 
 gitignore="$REPO_ROOT/.gitignore"
 if [[ -f "$gitignore" ]]; then
-  if grep -qE 'environment\.md' "$gitignore"; then
+  # Match an actual ignore RULE, not a comment. .gitignore carries an explanatory
+  # comment containing this filename; grepping the whole file would let the comment
+  # alone satisfy the assertion and make it impossible to fail.
+  if grep -vE '^[[:space:]]*#' "$gitignore" | grep -qE 'environment\.md'; then
     pass ".gitignore blocks environment.md (skills/*/environment.md pattern)"
   else
     fail ".gitignore should block environment.md (skills/*/environment.md)"
   fi
 
-  if grep -qE '\*\.env' "$gitignore"; then
+  # Same comment-stripping as the environment.md rule above. Grepping the whole file
+  # lets an explanatory comment that merely names `*.env` satisfy the assertion that
+  # `*.env` is ignored, which is mere occurrence rather than an actual ignore rule.
+  if grep -vE '^[[:space:]]*#' "$gitignore" | grep -qE '\*\.env'; then
     pass ".gitignore blocks *.env files"
   else
     fail ".gitignore should block *.env files"
@@ -247,13 +365,4 @@ else
 fi
 
 # --- Summary ---
-total=$((PASSES + FAILS))
-printf "\n${C_BOLD}Security:${C_RESET} $PASSES/$total passed"
-if [[ $FAILS -eq 0 ]]; then
-  printf " ${C_GREEN}(all passed)${C_RESET}"
-else
-  printf " ${C_RED}($FAILS failed)${C_RESET}"
-fi
-printf "\n"
-
-exit $FAILS
+summary_and_exit

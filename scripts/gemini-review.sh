@@ -6,12 +6,18 @@
 #     ./scripts/gemini-review.sh [--reviewer <name>] [--model <model>] [--all]
 #
 # Reviewers: swe, security, devrel (default: swe)
-# Models: gemini-2.5-flash (default), gemini-2.5-pro
+# Models: any model the Gemini API accepts (default: gemini-2.5-flash)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Scratch dir for the request body and the curl config that carries the API key.
+# mktemp -d creates it 0700, so the key is never world-readable and never in argv.
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemini-review.XXXXXX")"
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
 
 # Color output
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
@@ -26,6 +32,16 @@ REVIEWER="swe"
 MODEL="gemini-2.5-flash"
 RUN_ALL=false
 API_BASE="https://generativelanguage.googleapis.com/v1beta"
+# Thinking models spend part of the output budget on reasoning tokens, so a
+# small budget silently truncates the review. Override if a reviewer runs long.
+MAX_OUTPUT_TOKENS="${GEMINI_MAX_OUTPUT_TOKENS:-32768}"
+PRICING_URL="https://ai.google.dev/gemini-api/docs/pricing"
+PRICING_VERIFIED="2026-08-07"
+if [[ -n "${GEMINI_PRICE_IN:-}" && -n "${GEMINI_PRICE_OUT:-}" ]]; then
+  PRICE_NOTE="GEMINI_PRICE_* override"
+else
+  PRICE_NOTE="rates as of $PRICING_VERIFIED"
+fi
 
 usage() {
   cat <<'EOF'
@@ -35,9 +51,16 @@ Run tabula rasa reviews on the 1password-skill plugin via Gemini API.
 
 Options:
   --reviewer <name>   Reviewer persona: swe, security, devrel (default: swe)
-  --model <model>     Gemini model: gemini-2.5-pro, gemini-2.5-flash (default: gemini-2.5-pro)
+  --model <model>     Any model the Gemini API accepts, e.g. gemini-2.5-flash,
+                      gemini-2.5-pro (default: gemini-2.5-flash)
   --all               Run all 3 reviewers sequentially
   --help              Show this help
+
+Environment:
+  GEMINI_MAX_OUTPUT_TOKENS  Output token budget per review (default: 32768)
+  GEMINI_PRICE_IN           USD per 1M input tokens, for the cost estimate
+  GEMINI_PRICE_OUT          USD per 1M output tokens, for the cost estimate
+                            Current rates: https://ai.google.dev/gemini-api/docs/pricing
 
 Prerequisites:
   GEMINI_API_KEY must be set. Use 1Password to inject it:
@@ -54,54 +77,93 @@ EOF
 # Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --reviewer) REVIEWER="$2"; shift 2 ;;
-    --model) MODEL="$2"; shift 2 ;;
+    --reviewer)
+      [[ -n "${2:-}" ]] || { echo "Error: --reviewer requires a value" >&2; exit 1; }
+      REVIEWER="$2"; shift 2 ;;
+    --model)
+      [[ -n "${2:-}" ]] || { echo "Error: --model requires a value" >&2; exit 1; }
+      MODEL="$2"; shift 2 ;;
     --all) RUN_ALL=true; shift ;;
     --help|-h) usage; exit 0 ;;
-    *) echo "Unknown arg: $1"; exit 1 ;;
+    *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
 
 # Validate API key
 if [[ -z "${GEMINI_API_KEY:-}" ]]; then
-  echo "Error: GEMINI_API_KEY not set. Use op run to inject it:"
-  echo '  op run --env-file=<(echo '"'"'GEMINI_API_KEY=op://YourVault/Gemini API Key/credential'"'"') -- ./scripts/gemini-review.sh'
+  echo "Error: GEMINI_API_KEY not set. Use op run to inject it:" >&2
+  echo '  op run --env-file=<(echo '"'"'GEMINI_API_KEY=op://YourVault/Gemini API Key/credential'"'"') -- ./scripts/gemini-review.sh' >&2
   exit 1
 fi
+
+# The key is written into a double-quoted curl config value, where exactly two
+# characters are special (backslash escapes, double quote terminates) and
+# whitespace/newlines would truncate or corrupt the header. Reject those up
+# front rather than hand-escaping them: Gemini API keys never contain them, and
+# escaping a backslash through bash parameter substitution is a portability trap.
+case "$GEMINI_API_KEY" in
+  *[[:space:]]*)
+    echo "Error: GEMINI_API_KEY contains whitespace — check the 1Password field for a stray newline." >&2
+    exit 1 ;;
+  *\\*|*'"'*)
+    echo 'Error: GEMINI_API_KEY contains a backslash or double quote — not a valid Gemini API key.' >&2
+    exit 1 ;;
+esac
 
 # Validate reviewer
 case "$REVIEWER" in
   swe|security|devrel) ;;
-  *) echo "Error: Unknown reviewer '$REVIEWER'. Must be: swe, security, devrel"; exit 1 ;;
+  *) echo "Error: Unknown reviewer '$REVIEWER'. Must be: swe, security, devrel" >&2; exit 1 ;;
 esac
 
-# Validate model
+# Validate model. Deliberately open: a closed allow-list here would reject every
+# future model and force a code edit. Let the API be the authority on names.
 case "$MODEL" in
-  gemini-2.5-pro|gemini-2.5-flash) ;;
-  *) echo "Error: Unknown model '$MODEL'. Must be: gemini-2.5-pro, gemini-2.5-flash"; exit 1 ;;
+  */*|"")
+    echo "Error: invalid model name '$MODEL'" >&2; exit 1 ;;
+  gemini-*) ;;
+  *)
+    echo "Warning: '$MODEL' is not a gemini-* model name; passing it to the API anyway." >&2 ;;
+esac
+
+# Validate output token budget
+case "$MAX_OUTPUT_TOKENS" in
+  ''|*[!0-9]*)
+    echo "Error: GEMINI_MAX_OUTPUT_TOKENS must be a positive integer (got '$MAX_OUTPUT_TOKENS')" >&2
+    exit 1 ;;
 esac
 
 # Bundle files into context string
 bundle_files() {
   local files=(
     "skills/1password/SKILL.md"
-    "plugin.json"
+    ".claude-plugin/plugin.json"
     "README.md"
     ".gitignore"
     "scripts/convert.sh"
+    "integrations/gemini-cli/skills/1password/SKILL.md"
+    "integrations/cursor/.cursor/rules/1password.mdc"
+    "integrations/aider/CONVENTIONS.md"
+    "integrations/windsurf/.windsurfrules"
   )
-  local bundle=""
+  local bundle="" f path missing=0
   for f in "${files[@]}"; do
-    local path="$REPO_ROOT/$f"
-    if [[ -f "$path" ]]; then
-      bundle+="### File: $f"$'\n'
-      bundle+="$(cat "$path")"$'\n\n'
-    else
-      bundle+="### File: $f"$'\n'
-      bundle+="(file not found)"$'\n\n'
+    path="$REPO_ROOT/$f"
+    # A missing file is a hard error: a "(file not found)" placeholder invites the
+    # reviewer to render a verdict on a file it was never sent.
+    if [[ ! -f "$path" ]]; then
+      echo "Error: review bundle file missing: $f" >&2
+      missing=$((missing + 1))
+      continue
     fi
+    bundle+="### File: $f"$'\n'
+    bundle+="$(cat "$path")"$'\n\n'
   done
-  echo "$bundle"
+  if [[ "$missing" -gt 0 ]]; then
+    echo "Error: $missing bundle file(s) missing — aborting rather than shipping an incomplete review bundle." >&2
+    return 1
+  fi
+  printf '%s\n' "$bundle"
 }
 
 # Reviewer prompts
@@ -196,24 +258,62 @@ EOF
   esac
 }
 
-# Call Gemini API; echoes full raw JSON response
+# Call Gemini API; echoes the raw JSON response. Fails closed on a transport
+# error, a non-2xx status, or an API-level error object.
 call_gemini_raw() {
   local prompt="$1"
-  curl -s -X POST \
-    "${API_BASE}/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "$(jq -n --arg text "$prompt" '{
-      contents: [{parts: [{text: $text}]}],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 8192
-      }
-    }')"
+  local body_file="$TMP_DIR/request.json"
+  local cfg_file="$TMP_DIR/curl.cfg"
+
+  jq -n --arg text "$prompt" --argjson max "$MAX_OUTPUT_TOKENS" '{
+    contents: [{parts: [{text: $text}]}],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: $max
+    }
+  }' > "$body_file"
+
+  # The API key goes in a curl config file, never in argv and never in the URL:
+  # argv is readable by any local process via ps, and a query parameter is
+  # additionally recorded by every proxy and access log along the way.
+  # Double-quoted config value; the key was validated at startup to contain no
+  # backslash, double quote, or whitespace, so no escaping is needed here.
+  printf 'header = "x-goog-api-key: %s"\n' "$GEMINI_API_KEY" > "$cfg_file"
+
+  local raw http_code
+  if ! raw="$(curl --config "$cfg_file" \
+      --silent --show-error \
+      --request POST \
+      --url "${API_BASE}/models/${MODEL}:generateContent" \
+      --header "Content-Type: application/json" \
+      --data-binary "@$body_file" \
+      --write-out '\n%{http_code}')"; then
+    echo "Error: Gemini API request failed (curl transport error)" >&2
+    return 1
+  fi
+
+  http_code="${raw##*$'\n'}"
+  raw="${raw%$'\n'*}"
+
+  case "$http_code" in
+    2[0-9][0-9]) ;;
+    *)
+      echo "Error: Gemini API returned HTTP $http_code for model '$MODEL'" >&2
+      printf '%s\n' "$raw" | jq -r '.error.message // .' >&2 || printf '%s\n' "$raw" >&2
+      return 1 ;;
+  esac
+
+  printf '%s\n' "$raw"
 }
 
-# Extract text from Gemini response JSON
+# Extract text from Gemini response JSON (joins all parts; empty if none)
 extract_text() {
-  echo "$1" | jq -r '.candidates[0].content.parts[0].text // "Error: No response generated"'
+  printf '%s' "$1" | jq -r '[.candidates[0].content.parts[]? | .text // empty] | join("")'
+}
+
+# Extract the candidate finish reason ("MISSING" if the response has none)
+extract_finish_reason() {
+  printf '%s' "$1" | jq -r '.candidates[0].finishReason // "MISSING"'
 }
 
 # Extract token counts
@@ -225,19 +325,32 @@ extract_tokens() {
   echo "$input_tokens $output_tokens"
 }
 
-# Estimate cost based on model and token counts
+# Estimate cost based on model and token counts.
+# Echoes a dollar figure, or the literal string "unknown" when no rate is on
+# file for the model — a wrong number is worse than an admitted gap.
 estimate_cost() {
   local model="$1"
   local input_tokens="$2"
   local output_tokens="$3"
 
-  # Pricing per 1M tokens
+  # Pricing per 1M tokens. Source: $PRICING_URL, last verified $PRICING_VERIFIED.
+  # These go stale; GEMINI_PRICE_IN / GEMINI_PRICE_OUT override without a code edit.
   local input_rate output_rate
-  case "$model" in
-    gemini-2.5-pro)   input_rate="1.25"; output_rate="10.00" ;;
-    gemini-2.5-flash) input_rate="0.15"; output_rate="0.60" ;;
-    *)                input_rate="1.25"; output_rate="10.00" ;;
-  esac
+  if [[ -n "${GEMINI_PRICE_IN:-}" && -n "${GEMINI_PRICE_OUT:-}" ]]; then
+    input_rate="$GEMINI_PRICE_IN"; output_rate="$GEMINI_PRICE_OUT"
+  else
+    case "$model" in
+      gemini-2.5-pro)
+        # Two tiers, split at 200K input tokens.
+        if [[ "$input_tokens" -gt 200000 ]]; then
+          input_rate="2.50"; output_rate="15.00"
+        else
+          input_rate="1.25"; output_rate="10.00"
+        fi ;;
+      gemini-2.5-flash) input_rate="0.30"; output_rate="2.50" ;;
+      *) echo "unknown"; return 0 ;;
+    esac
+  fi
 
   # Use awk for floating point math
   awk -v in_tok="$input_tokens" -v out_tok="$output_tokens" \
@@ -280,7 +393,12 @@ print_footer() {
   printf "${C_YELLOW}───────────────────────────────────────────────────${C_RESET}\n"
   printf "${C_YELLOW}  Tokens: %s in / %s out${C_RESET}\n" \
     "$(fmt_tokens "$input_tokens")" "$(fmt_tokens "$output_tokens")"
-  printf "${C_YELLOW}  Cost: ~\$%s (estimated)${C_RESET}\n" "$cost"
+  if [[ "$cost" == "unknown" ]]; then
+    printf "${C_YELLOW}  Cost: unknown — no rate on file for %s${C_RESET}\n" "$MODEL"
+    printf "${C_YELLOW}         set GEMINI_PRICE_IN / GEMINI_PRICE_OUT (see %s)${C_RESET}\n" "$PRICING_URL"
+  else
+    printf "${C_YELLOW}  Cost: ~\$%s (estimate; %s)${C_RESET}\n" "$cost" "$PRICE_NOTE"
+  fi
   printf "${C_YELLOW}───────────────────────────────────────────────────${C_RESET}\n"
   echo ""
 }
@@ -308,8 +426,24 @@ run_reviewer() {
   local review_text
   review_text="$(extract_text "$raw_response")"
 
-  # Print review content
-  echo "$review_text"
+  # Print review content (whatever arrived, even if truncated)
+  printf '%s\n' "$review_text"
+
+  # A truncated or filtered review must not look like a successful one.
+  local finish_reason
+  finish_reason="$(extract_finish_reason "$raw_response")"
+  if [[ "$finish_reason" != "STOP" ]]; then
+    printf "${C_RED}Error: review incomplete — finishReason=%s${C_RESET}\n" "$finish_reason" >&2
+    if [[ "$finish_reason" == "MAX_TOKENS" ]]; then
+      echo "  Thinking tokens count against the output budget. Retry with a larger one:" >&2
+      echo "  GEMINI_MAX_OUTPUT_TOKENS=$((MAX_OUTPUT_TOKENS * 2)) $0 --reviewer $reviewer" >&2
+    fi
+    exit 1
+  fi
+  if [[ -z "$review_text" ]]; then
+    printf "${C_RED}Error: Gemini returned no review text${C_RESET}\n" >&2
+    exit 1
+  fi
 
   # Extract usage
   local tokens
@@ -324,25 +458,31 @@ run_reviewer() {
 # Run all reviewers and print summary
 run_all() {
   local reviewers=("swe" "security" "devrel")
-  declare -A summary_in_tokens
-  declare -A summary_out_tokens
-  declare -A summary_costs
+  # Parallel indexed arrays keyed by loop position — bash 3.2 has no associative
+  # arrays, and `declare -A` is a hard error there.
+  local summary_in summary_out summary_costs
+  summary_in=(); summary_out=(); summary_costs=()
 
+  local r i
   for r in "${reviewers[@]}"; do
     REVIEWER="$r"
     run_reviewer "$r"
-    summary_in_tokens[$r]="$_LAST_INPUT_TOKENS"
-    summary_out_tokens[$r]="$_LAST_OUTPUT_TOKENS"
-    summary_costs[$r]="$_LAST_COST"
+    summary_in+=("$_LAST_INPUT_TOKENS")
+    summary_out+=("$_LAST_OUTPUT_TOKENS")
+    summary_costs+=("$_LAST_COST")
   done
 
-  # Compute total cost
-  local total_cost
-  total_cost=$(awk \
-    -v swe="${summary_costs[swe]}" \
-    -v sec="${summary_costs[security]}" \
-    -v dr="${summary_costs[devrel]}" \
-    'BEGIN { printf "%.2f\n", swe + sec + dr }')
+  # Compute total cost, skipping any reviewer whose model has no rate on file
+  # Accumulate at full precision; rounding each addition would drift the total.
+  local total_cost="0.000000" unpriced=0 c
+  for c in "${summary_costs[@]}"; do
+    if [[ "$c" == "unknown" ]]; then
+      unpriced=$((unpriced + 1))
+      continue
+    fi
+    total_cost="$(awk -v a="$total_cost" -v b="$c" 'BEGIN { printf "%.6f\n", a + b }')"
+  done
+  total_cost="$(awk -v a="$total_cost" 'BEGIN { printf "%.4f\n", a }')"
 
   echo ""
   printf "${C_BOLD}╔═══════════════════════════════════════════════════╗${C_RESET}\n"
@@ -351,14 +491,24 @@ run_all() {
   echo ""
   printf "  %-10s  %-18s  %-13s  %s\n" "Reviewer" "Model" "Tokens" "Cost"
   printf "  %-10s  %-18s  %-13s  %s\n" "---------" "----------------" "-----------" "------"
-  for r in "${reviewers[@]}"; do
-    local tok_str
-    tok_str="$(fmt_tokens "${summary_in_tokens[$r]}")/$(fmt_tokens "${summary_out_tokens[$r]}")"
-    printf "  %-10s  %-18s  %-13s  \$%s\n" \
-      "$r" "$MODEL" "$tok_str" "${summary_costs[$r]}"
+  local tok_str cost_str
+  i=0
+  while [[ "$i" -lt "${#reviewers[@]}" ]]; do
+    tok_str="$(fmt_tokens "${summary_in[$i]}")/$(fmt_tokens "${summary_out[$i]}")"
+    if [[ "${summary_costs[$i]}" == "unknown" ]]; then
+      cost_str="unknown"
+    else
+      cost_str="\$${summary_costs[$i]}"
+    fi
+    printf "  %-10s  %-18s  %-13s  %s\n" \
+      "${reviewers[$i]}" "$MODEL" "$tok_str" "$cost_str"
+    i=$((i + 1))
   done
   echo ""
   printf "  %47s \$%s\n" "Total:" "$total_cost"
+  if [[ "$unpriced" -gt 0 ]]; then
+    printf "  %47s %s\n" "" "(excludes $unpriced review(s) with no rate on file)"
+  fi
   echo ""
 }
 

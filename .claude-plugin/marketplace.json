@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "petejm-plugins",
+  "description": "Claude Code plugins by Peter McDade",
+  "owner": {
+    "name": "Peter McDade",
+    "url": "https://github.com/petejm"
+  },
+  "plugins": [
+    {
+      "name": "1password-skill",
+      "source": "./",
+      "description": "Claude Code skill for 1Password CLI — auth recovery, secret retrieval, SSH agent, git commit signing, shell plugins, service accounts, and troubleshooting",
+      "version": "1.1.0",
+      "author": {
+        "name": "Peter McDade",
+        "url": "https://github.com/petejm"
+      },
+      "homepage": "https://github.com/petejm/1password-skill",
+      "repository": "https://github.com/petejm/1password-skill",
+      "license": "Apache-2.0",
+      "category": "security",
+      "keywords": [
+        "1password",
+        "op-cli",
+        "secrets",
+        "ssh-agent",
+        "git-signing",
+        "security"
+      ]
+    }
+  ]
+}

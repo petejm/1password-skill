@@ -1,6 +1,11 @@
 .DS_Store
 *.swp
 *~
+# Local, developer-owned environment override (see README "Environment Overrides")
+.claude/skills/1password-environment/
+# Legacy override path: README <= 1.0.0 told users to create an environment.md
+# alongside the installed skill and promised it was gitignored. Kept so anyone who
+# followed those instructions cannot accidentally commit device paths / infra detail.
 skills/*/environment.md
 *.env
 .idea/

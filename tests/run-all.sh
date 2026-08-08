@@ -38,6 +38,40 @@ TOTAL_PASS=0
 TOTAL_FAIL=0
 OVERALL_EXIT=0
 
+# Probe nanosecond support ONCE. Do not infer it from the length of the result:
+# BSD date (macOS) has no %N conversion, emits the literal character 'N', and still
+# exits 0 — so `date +%s%N || date +%s` never takes the fallback and produces
+# garbage like "1754600000N". Timing is cosmetic and must never gate test execution.
+HAVE_NS=0
+_ns_probe=$(date +%s%N 2>/dev/null || true)
+if [[ "$_ns_probe" =~ ^[0-9]+$ && ${#_ns_probe} -gt 10 ]]; then
+  HAVE_NS=1
+fi
+
+# Each suite declares its own assertion floor as `EXPECTED_MIN_ASSERTIONS=<n>`. Read it
+# back here so a CRASHED suite is scored as the assertions it OWNS rather than as a
+# single failure — a suite of 64 assertions that dies before the first one is not one
+# failure, and reporting it as one prints a near-perfect total for a broken run.
+# Falls back to 1 (the old behaviour) when the constant is absent, which is still a
+# failure and still forces OVERALL_EXIT=1.
+expected_for_suite() {
+  local script="$1" n=""
+  n=$(grep -E '^EXPECTED_MIN_ASSERTIONS=[0-9]+$' "$script" 2>/dev/null | head -1 | cut -d= -f2)
+  [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] || n=1
+  printf '%s\n' "$n"
+}
+
+now_ticks() {
+  local t
+  if [[ $HAVE_NS -eq 1 ]]; then
+    t=$(date +%s%N 2>/dev/null || true)
+  else
+    t=$(date +%s 2>/dev/null || true)
+  fi
+  [[ "$t" =~ ^[0-9]+$ ]] || t=0
+  printf '%s\n' "$t"
+}
+
 # Header
 printf "\n${C_BOLD}${C_CYAN}1password-skill — Test Suite${C_RESET}\n"
 printf "${C_DIM}%s${C_RESET}\n" "$(date '+%Y-%m-%d %H:%M:%S')"
@@ -56,24 +90,25 @@ for i in "${!SUITE_NAMES[@]}"; do
     continue
   fi
 
+  # Report a missing executable bit instead of silently repairing it — the runner
+  # must not mutate the repo. Suites are invoked via `bash`, so the bit is optional.
   if [[ ! -x "$script" ]]; then
-    chmod +x "$script"
+    printf "  ${C_YELLOW}WARN${C_RESET} %s is not executable (chmod +x it)\n" "$script"
   fi
 
-  start_time=$(date +%s%N 2>/dev/null || date +%s)
+  start_time=$(now_ticks)
 
   # Run suite, capture output and exit code
   exit_code=0
-  suite_output=$(NO_COLOR="${NO_COLOR:-}" "$script" 2>&1) || exit_code=$?
+  suite_output=$(NO_COLOR="${NO_COLOR:-}" bash "$script" 2>&1) || exit_code=$?
 
-  end_time=$(date +%s%N 2>/dev/null || date +%s)
+  end_time=$(now_ticks)
 
-  # Calculate duration in ms (falls back to seconds if %N not supported)
-  if [[ ${#start_time} -gt 10 ]]; then
+  if [[ $HAVE_NS -eq 1 ]]; then
     duration_ms=$(( (end_time - start_time) / 1000000 ))
-    duration_str="${duration_ms}ms"
+    duration_str="${duration_ms:-0}ms"
   else
-    duration_str="$((end_time - start_time))s"
+    duration_str="$(( end_time - start_time ))s"
   fi
 
   SUITE_EXIT_CODES+=("$exit_code")
@@ -85,8 +120,24 @@ for i in "${!SUITE_NAMES[@]}"; do
   echo "$suite_output"
 
   # Extract pass/fail counts from suite output summary line
-  pass_count=$(echo "$suite_output" | grep -oE '[0-9]+/[0-9]+ passed' | grep -oE '^[0-9]+' | tail -1 || echo 0)
-  total_count=$(echo "$suite_output" | grep -oE '[0-9]+/[0-9]+ passed' | grep -oE '/[0-9]+' | tr -d '/' | tail -1 || echo 0)
+  pass_count=$(echo "$suite_output" | grep -oE '[0-9]+/[0-9]+ passed' | grep -oE '^[0-9]+' | tail -1)
+  total_count=$(echo "$suite_output" | grep -oE '[0-9]+/[0-9]+ passed' | grep -oE '/[0-9]+' | tr -d '/' | tail -1)
+  [[ "$pass_count" =~ ^[0-9]+$ ]] || pass_count=0
+  [[ "$total_count" =~ ^[0-9]+$ ]] || total_count=0
+
+  # A suite that dies before printing its summary emits no 'N/M passed' line. Scraping
+  # would report 0 passed / 0 failed — zero failures for a suite that never ran. Treat
+  # an unparseable or zero-assertion summary as a hard error of its own.
+  if [[ $total_count -eq 0 ]]; then
+    unrun=$(expected_for_suite "$script")
+    printf "  ${C_RED}CRASHED${C_RESET} %s produced no summary line (exit %s) — %s assertions did not run\n" \
+      "$name" "$exit_code" "$unrun"
+    SUITE_EXIT_CODES[$i]=$(( exit_code == 0 ? 1 : exit_code ))
+    TOTAL_FAIL=$(( TOTAL_FAIL + unrun ))
+    OVERALL_EXIT=1
+    continue
+  fi
+
   fail_count=$(( total_count - pass_count ))
 
   TOTAL_PASS=$(( TOTAL_PASS + pass_count ))
