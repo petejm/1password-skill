@@ -39,6 +39,22 @@ of being silently overwritten before the assertions run.
 `run-all.sh` invokes each suite with `bash`, so a missing executable bit is **reported**
 (`WARN`) rather than repaired with `chmod`.
 
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request. Three jobs:
+
+| Job | What it checks |
+|---|---|
+| `test` | This test suite, on a matrix of `ubuntu-latest` and `macos-latest` |
+| `shellcheck` | Every `.sh` in `tests/` and `scripts/`, gated at `--severity=error` (see below) |
+| `release-gate` | plugin.json/marketplace.json validity, the three-way version lock, marketplace.json being tracked in git, and CHANGELOG link references — the invariants that broke or nearly broke the 1.1.0 release |
+
+**The macOS leg of `test` is what actually validates this project's bash 3.2 target.** `ubuntu-latest` only ever has GNU bash 5.x available, so it exercises the GNU-userland side of compatibility (grep, sed, `stat -c`, etc.) but can never prove a script runs correctly under bash 3.2. `macos-latest` ships `/bin/bash` 3.2.57 — Apple has frozen it there since bash 4 relicensed under GPLv3 — and the CI job invokes it explicitly (`/bin/bash tests/run-all.sh`, not `./tests/run-all.sh` or a bare `bash`) so there is no PATH lookup between "the interpreter this job claims to test" and "the interpreter that actually runs the suite." A prior draft of this job relied on `BASH_COMPAT=3.2` under GNU bash 5 instead; that was rejected because `BASH_COMPAT` changes some runtime behavior but does not make bash 5 reject bash-4+-only syntax such as `declare -A` — a script using it would still run under `BASH_COMPAT=3.2` and pass, then break on real macOS. The CI job asserts `/bin/bash --version` reports a 3.x major version before running anything, and fails the job outright if it doesn't.
+
+CI installs PyYAML before running anything (`pip install pyyaml`, after `actions/setup-python`) — see Prerequisites above for why this is mandatory rather than best-effort.
+
+shellcheck has no history in this repo prior to this workflow (it isn't installed on the maintainer's dev machine). The gating check is `--severity=error` only; a second, non-gating step prints the full report at every severity so lower-severity findings stay visible in CI logs rather than disappearing. As of the workflow being added: 0 errors, 92 lower-severity findings (86 info — almost all `SC2059`, printf format strings built from color-code variables; 5 style — `SC2004`, unnecessary `$` on arithmetic array subscripts; 1 warning — `SC2034`, an unused variable in `test-content.sh`). None of these are exploitable or behavior-changing; they're a documented starting bar to tighten over time, not a clean bill of health.
+
 ## How to run
 
 ```bash

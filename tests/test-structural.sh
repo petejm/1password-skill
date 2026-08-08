@@ -254,7 +254,7 @@ else
     # `[[:space:]]*$` allows trailing whitespace and nothing else. Targets are built
     # from the [A-Za-z0-9][A-Za-z0-9 -]* class above, so they carry no ERE metacharacter
     # ('-' is literal outside a bracket expression).
-    if grep -qE "^## $target[[:space:]]*$" "$SKILL_MD"; then
+    if grep -qE "^## ${target}[[:space:]]*$" "$SKILL_MD"; then
       pass "Section '## $target' exists (referenced in router)"
     else
       fail "Section '## $target' exists (referenced in router)"
@@ -268,7 +268,7 @@ printf "\n${C_BOLD}Required sections${C_RESET}\n"
 # Same whole-heading anchor as the router loop above: an unanchored prefix match would
 # accept `## Error Catalog Notes` as satisfying "## Error Catalog exists".
 for section in "Error Catalog" "Security Rules"; do
-  if grep -qE "^## $section[[:space:]]*$" "$SKILL_MD"; then
+  if grep -qE "^## ${section}[[:space:]]*$" "$SKILL_MD"; then
     pass "Section '## $section' exists"
   else
     fail "Section '## $section' exists"

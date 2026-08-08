@@ -1,5 +1,7 @@
 # 1password-skill
 
+[![CI](https://github.com/petejm/1password-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/petejm/1password-skill/actions/workflows/ci.yml)
+
 A [Claude Code](https://code.claude.com/docs/en/overview) plugin that teaches Claude how to use the [1Password CLI (`op`)](https://www.1password.dev/cli/) safely and effectively.
 
 No more fumbling with `op` flags, forgetting `--reveal`, or leaking secrets into your conversation. Install the plugin and Claude handles auth recovery, secret injection, SSH agent setup, git commit signing, shell plugins, service accounts, and troubleshooting — all with security guardrails built in.

@@ -1,0 +1,233 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: nothing in this workflow needs to write to the repo, open
+# issues/PRs, or touch anything beyond reading the checked-out code.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # test — runs tests/run-all.sh on both a GNU userland (ubuntu) and a real
+  # BSD/Apple bash 3.2 userland (macOS). The macOS leg is the reason this job
+  # exists: it is the only way to validate the project's stated bash 3.2
+  # target against an actual bash 3.2 binary, rather than GNU bash running
+  # under BASH_COMPAT=3.2 — which has already been shown to be a weak gate
+  # (it does not reject bash-4+-only syntax like `declare -A`).
+  # ---------------------------------------------------------------------------
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # tests/test-structural.sh (and test-integration.sh) import PyYAML directly
+      # to validate generated frontmatter. Per tests/README.md this is a hard
+      # requirement, not an optional extra — the suite fails loudly rather than
+      # skipping when it's missing, so CI must install it before running anything.
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Print default `bash` version (informational — see macOS assertion below for the gating check)
+        run: bash --version | head -1
+
+      # This is the load-bearing check in the whole workflow. macOS runner images
+      # ship /bin/bash 3.2.57 (Apple has frozen it there since bash 4 relicensed
+      # under GPLv3), but a *plain* `bash` invocation is a PATH lookup: if a
+      # Homebrew bash 5.x ever ends up earlier in PATH (pre-installed on the
+      # image, or added by a prior step/action), every suite below would
+      # silently run under bash 5 while this job still claims to validate 3.2.
+      # BASH_COMPAT=3.2 was tried and rejected for this same reason — it changes
+      # *some* bash-5 behavior to match 3.2 but does not make bash 5 reject
+      # bash-4+ syntax such as `declare -A`. The only reliable check is asking
+      # the actual /bin/bash binary what it is, and failing hard if it isn't 3.x.
+      - name: Assert /bin/bash is bash 3.x (macOS only — this job's entire reason to exist)
+        if: runner.os == 'macOS'
+        run: |
+          VERSION_STRING="$(/bin/bash --version | head -1)"
+          echo "/bin/bash --version: $VERSION_STRING"
+          MAJOR="$(printf '%s\n' "$VERSION_STRING" | sed -E 's/^GNU bash, version ([0-9]+)\..*/\1/')"
+          echo "Parsed major version: $MAJOR"
+          if [ "$MAJOR" != "3" ]; then
+            echo "::error::/bin/bash on this macOS runner is not bash 3.x (parsed major='$MAJOR' from '$VERSION_STRING'). This job exists specifically to validate the project's bash-3.2 target against a real 3.2 binary. If Apple's runner image changed what /bin/bash is, that needs an explicit decision about how this project still tests bash 3.2 — not a silent pass under a different interpreter."
+            exit 1
+          fi
+          echo "Confirmed: /bin/bash is bash ${MAJOR}.x"
+
+      # ubuntu-latest has no bash 3.x available at all, so it exercises the
+      # other half of the compatibility promise: current GNU bash + GNU
+      # userland tools (grep, sed, stat -c, etc).
+      - name: Run test suite (Linux — default GNU bash 5.x)
+        if: runner.os == 'Linux'
+        run: |
+          bash --version | head -1
+          bash tests/run-all.sh --no-color
+
+      # Deliberately `/bin/bash tests/run-all.sh`, NOT `./tests/run-all.sh`.
+      # The script's shebang is `#!/usr/bin/env bash`, which does its own
+      # independent PATH lookup — running it via the shebang would reintroduce
+      # exactly the PATH-resolution risk the assertion step above just checked
+      # for, just one layer down. Invoking /bin/bash directly removes that
+      # indirection entirely: this line is guaranteed to run under the binary
+      # just verified as bash 3.x, and run-all.sh's own `"${BASH:-bash}"` fix
+      # (see tests/run-all.sh) propagates that same interpreter to every suite
+      # it launches in turn.
+      - name: Run test suite (macOS — explicit /bin/bash, bypassing shebang PATH lookup)
+        if: runner.os == 'macOS'
+        run: /bin/bash tests/run-all.sh --no-color
+
+  # ---------------------------------------------------------------------------
+  # shellcheck — lints every .sh in tests/ and scripts/. This has never been run
+  # against this repo before (not installed on the maintainer's dev machine), so
+  # the first run surfaces pre-existing findings. The gating pass is deliberately
+  # narrowed to --severity=error as a starting bar; the second pass below prints
+  # every finding at every severity so lower-severity debt stays visible in every
+  # CI log instead of being silently swallowed. This is not a blanket disable:
+  # nothing here suppresses a finding, it only decides which ones fail the build
+  # today. As of this workflow being added, `--severity=error` passes clean (0
+  # findings) and the full report has 92 lower-severity findings (86 info, 5
+  # style, 1 warning) — see tests/README.md for the breakdown. Tighten the
+  # --severity threshold as that backlog gets worked down.
+  # ---------------------------------------------------------------------------
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ubuntu-latest runner images ship shellcheck preinstalled; no separate
+      # install action needed. Printing the version keeps future finding drift
+      # (e.g. a runner-image shellcheck upgrade surfacing new findings even
+      # though no shell script changed) attributable from the log.
+      - name: shellcheck version
+        run: shellcheck --version
+
+      - name: shellcheck (gating — error severity only)
+        run: shellcheck --severity=error tests/*.sh scripts/*.sh
+
+      - name: shellcheck (informational — full report, all severities, non-gating)
+        if: always()
+        run: |
+          echo "Full report below is informational only and does not gate this job."
+          echo "Lower-severity findings here are pre-existing debt to be tightened over time,"
+          echo "not a passing grade — see tests/README.md and the comment above this job."
+          shellcheck tests/*.sh scripts/*.sh || true
+
+  # ---------------------------------------------------------------------------
+  # release-gate — guards the invariants that broke or nearly broke the 1.1.0
+  # release, all of which were previously verified by hand with no automated
+  # check:
+  #   1. plugin.json and marketplace.json are valid JSON
+  #   2. plugin.json version == marketplace.json version == newest dated
+  #      CHANGELOG.md heading (the three-way version lock)
+  #   3. .claude-plugin/marketplace.json is tracked in git (it was untracked
+  #      right up until the release commit; if missing, the documented
+  #      marketplace install silently does not work)
+  #   4. every non-[Unreleased] CHANGELOG heading has a matching link
+  #      reference definition at the bottom of the file
+  # ---------------------------------------------------------------------------
+  release-gate:
+    name: release-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check release invariants
+        run: |
+          python3 - <<'PY'
+          import json, re, sys, subprocess
+
+          errors = []
+
+          def load_json(path):
+              try:
+                  with open(path) as f:
+                      return json.load(f)
+              except Exception as e:
+                  errors.append(f"{path}: invalid JSON -- {e}")
+                  return None
+
+          plugin = load_json(".claude-plugin/plugin.json")
+          marketplace = load_json(".claude-plugin/marketplace.json")
+
+          plugin_version = plugin.get("version") if plugin else None
+          mkt_version = None
+          if marketplace:
+              entries = marketplace.get("plugins", [])
+              entry = next((p for p in entries if p.get("name") == "1password-skill"), None)
+              if entry is None:
+                  errors.append("marketplace.json: no plugins[] entry named '1password-skill'")
+              else:
+                  mkt_version = entry.get("version")
+
+          changelog = open("CHANGELOG.md").read()
+          # "## [X.Y.Z] - DATE" or "## [Unreleased]" (no date). Keep a Changelog
+          # convention lists newest release first, so the first non-Unreleased
+          # heading found is treated as "the newest".
+          heading_re = re.compile(r'^## \[([^\]]+)\](?:\s*-\s*(.+?))?\s*$', re.MULTILINE)
+          headings = heading_re.findall(changelog)
+          released = [(v.strip(), d) for v, d in headings if v.strip().lower() != "unreleased"]
+
+          newest_version = released[0][0] if released else None
+          if not released:
+              errors.append("CHANGELOG.md: no dated release heading found")
+
+          if plugin and marketplace and newest_version:
+              versions = {
+                  "plugin.json": plugin_version,
+                  "marketplace.json": mkt_version,
+                  "CHANGELOG.md (newest heading)": newest_version,
+              }
+              distinct = set(versions.values())
+              if len(distinct) != 1 or None in distinct:
+                  errors.append(f"Version lock mismatch: {versions}")
+
+          r = subprocess.run(
+              ["git", "ls-files", "--error-unmatch", ".claude-plugin/marketplace.json"],
+              capture_output=True, text=True,
+          )
+          if r.returncode != 0:
+              errors.append(
+                  "`.claude-plugin/marketplace.json` is not tracked in git "
+                  "(git ls-files --error-unmatch failed). It was untracked right up "
+                  "until the 1.1.0 release commit; if it's missing, the documented "
+                  "marketplace install (`/plugin marketplace add ...`) silently does not work."
+              )
+
+          linkref_re = re.compile(r'^\[([^\]]+)\]:\s*\S+', re.MULTILINE)
+          linkrefs = set(v.strip() for v in linkref_re.findall(changelog))
+          for v, d in released:
+              if v not in linkrefs:
+                  errors.append(
+                      f"CHANGELOG.md: heading '## [{v}]' has no link reference "
+                      f"definition (missing `[{v}]: <url>` at the bottom of the file)"
+                  )
+
+          if errors:
+              print("RELEASE GATE FAILED:")
+              for e in errors:
+                  print(f"  - {e}")
+              sys.exit(1)
+
+          print("Release gate passed:")
+          print("  - plugin.json / marketplace.json: valid JSON")
+          print(f"  - version lock: {plugin_version} (plugin.json == marketplace.json == CHANGELOG newest heading)")
+          print("  - marketplace.json tracked in git")
+          print(f"  - {len(released)} CHANGELOG release heading(s), all have link reference definitions: {[v for v, d in released]}")
+          PY

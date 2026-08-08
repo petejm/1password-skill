@@ -100,7 +100,12 @@ for i in "${!SUITE_NAMES[@]}"; do
 
   # Run suite, capture output and exit code
   exit_code=0
-  suite_output=$(NO_COLOR="${NO_COLOR:-}" bash "$script" 2>&1) || exit_code=$?
+  # Propagate the interpreter actually running this script rather than doing a fresh
+  # PATH lookup on `bash`. On macOS CI, if a newer Homebrew bash sits earlier in PATH
+  # than /bin/bash, a bare `bash` here would silently run every suite under bash 5 while
+  # the job claims to validate bash 3.2 — $BASH is bash's own path to itself, so this
+  # keeps the suite pinned to whatever interpreter launched run-all.sh.
+  suite_output=$(NO_COLOR="${NO_COLOR:-}" "${BASH:-bash}" "$script" 2>&1) || exit_code=$?
 
   end_time=$(now_ticks)
 
