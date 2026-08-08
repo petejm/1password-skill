@@ -34,13 +34,16 @@ EXPECTED_MIN_ASSERTIONS=25
 
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"; C_BOLD="\033[1m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) turns \033 into a real ESC byte at assignment time, so
+  # color renders whether the variable ends up in a printf FORMAT string or a %s
+  # data argument (see scripts/convert.sh for why a plain "\033[...m" is not enough).
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_BOLD="" C_RESET=""
 fi
 
-pass() { PASSES=$((PASSES + 1)); printf "  ${C_GREEN}PASS${C_RESET} %s\n" "$1"; }
-fail() { FAILS=$((FAILS + 1));  printf "  ${C_RED}FAIL${C_RESET} %s\n" "$1"; }
+pass() { PASSES=$((PASSES + 1)); printf '%s\n' "  ${C_GREEN}PASS${C_RESET} $1"; }
+fail() { FAILS=$((FAILS + 1));  printf '%s\n' "  ${C_RED}FAIL${C_RESET} $1"; }
 
 summary_and_exit() {
   # Enforce the assertion floor on EVERY exit path, including the early
@@ -54,11 +57,11 @@ summary_and_exit() {
     fail "Suite ran only $_ran assertions (expected >= $EXPECTED_MIN_ASSERTIONS) -- assertion blocks were skipped"
   fi
   local total=$((PASSES + FAILS))
-  printf "\n${C_BOLD}Structural:${C_RESET} $PASSES/$total passed"
+  printf '\n%s' "${C_BOLD}Structural:${C_RESET} $PASSES/$total passed"
   if [[ $FAILS -eq 0 ]]; then
-    printf " ${C_GREEN}(all passed)${C_RESET}"
+    printf '%s' " ${C_GREEN}(all passed)${C_RESET}"
   else
-    printf " ${C_RED}($FAILS failed)${C_RESET}"
+    printf '%s' " ${C_RED}($FAILS failed)${C_RESET}"
   fi
   printf "\n"
   # Normalize to a boolean status: `exit $FAILS` wraps mod 256 (exactly 256 failures
@@ -67,12 +70,12 @@ summary_and_exit() {
   if [[ $FAILS -eq 0 ]]; then exit 0; else exit 1; fi
 }
 
-printf "\n${C_BOLD}${C_CYAN}=== Structural Tests ===${C_RESET}\n\n"
+printf '\n%s\n\n' "${C_BOLD}${C_CYAN}=== Structural Tests ===${C_RESET}"
 
 # --- Dependency gate ---
 # python3 is required for the JSON and YAML assertions below. Without this gate a
 # missing interpreter reads as a content defect instead of a tooling failure.
-printf "${C_BOLD}Prerequisites${C_RESET}\n"
+printf '%s\n' "${C_BOLD}Prerequisites${C_RESET}"
 if command -v python3 >/dev/null 2>&1; then
   pass "python3 is available"
 else
@@ -87,7 +90,7 @@ fi
 printf "\n"
 
 # --- SKILL.md existence and non-empty ---
-printf "${C_BOLD}SKILL.md basics${C_RESET}\n"
+printf '%s\n' "${C_BOLD}SKILL.md basics${C_RESET}"
 
 if [[ -f "$SKILL_MD" ]]; then
   pass "SKILL.md exists"
@@ -102,7 +105,7 @@ else
 fi
 
 # --- YAML frontmatter fields ---
-printf "\n${C_BOLD}YAML frontmatter${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}YAML frontmatter${C_RESET}"
 
 # Extract content between first pair of ---
 frontmatter=$(awk '/^---/{c++; if(c>2) exit} c==1 && !/^---/{print}' "$SKILL_MD")
@@ -136,7 +139,7 @@ else
 fi
 
 # --- plugin.json ---
-printf "\n${C_BOLD}plugin.json${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}plugin.json${C_RESET}"
 
 if [[ -f "$PLUGIN_JSON" ]]; then
   pass "plugin.json exists"
@@ -207,7 +210,7 @@ else
 fi
 
 # --- Decision Router ---
-printf "\n${C_BOLD}Decision Router${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Decision Router${C_RESET}"
 
 if grep -q "You're seeing\.\.\." "$SKILL_MD"; then
   pass "Decision router table exists (has 'You're seeing...' header)"
@@ -232,7 +235,7 @@ router_target_count=$(printf '%s\n' "$router_targets" | grep -c '^.' || true)
 # below would simply run fewer assertions and report success.
 ROUTER_MIN_TARGETS=5
 
-printf "\n${C_BOLD}Decision Router → Section mapping${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Decision Router → Section mapping${C_RESET}"
 if [[ -z "$router_section" ]]; then
   fail "Decision router section heading not found — expected '# 1Password CLI [—-] Decision Router'"
 elif [[ "$router_target_count" -eq 0 ]]; then
@@ -263,7 +266,7 @@ else
 fi
 
 # --- Required sections ---
-printf "\n${C_BOLD}Required sections${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Required sections${C_RESET}"
 
 # Same whole-heading anchor as the router loop above: an unanchored prefix match would
 # accept `## Error Catalog Notes` as satisfying "## Error Catalog exists".
@@ -276,7 +279,7 @@ for section in "Error Catalog" "Security Rules"; do
 done
 
 # --- Supporting files ---
-printf "\n${C_BOLD}Supporting files${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Supporting files${C_RESET}"
 
 for f in "README.md" "LICENSE" ".gitignore"; do
   if [[ -f "$REPO_ROOT/$f" ]]; then

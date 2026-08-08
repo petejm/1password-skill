@@ -23,13 +23,16 @@ EXPECTED_MIN_ASSERTIONS=32
 
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"; C_BOLD="\033[1m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) turns \033 into a real ESC byte at assignment time, so
+  # color renders whether the variable ends up in a printf FORMAT string or a %s
+  # data argument (see scripts/convert.sh for why a plain "\033[...m" is not enough).
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_BOLD="" C_RESET=""
 fi
 
-pass() { PASSES=$((PASSES + 1)); printf "  ${C_GREEN}PASS${C_RESET} %s\n" "$1"; }
-fail() { FAILS=$((FAILS + 1));  printf "  ${C_RED}FAIL${C_RESET} %s\n" "$1"; }
+pass() { PASSES=$((PASSES + 1)); printf '%s\n' "  ${C_GREEN}PASS${C_RESET} $1"; }
+fail() { FAILS=$((FAILS + 1));  printf '%s\n' "  ${C_RED}FAIL${C_RESET} $1"; }
 
 # Safe grep -c: returns 0 instead of 1 on no match (grep exits 1 on no match)
 gcount() { grep -c "$@" 2>/dev/null || true; }
@@ -47,23 +50,23 @@ summary_and_exit() {
     fail "Suite ran only $_ran assertions (expected >= $EXPECTED_MIN_ASSERTIONS) -- assertion blocks were skipped"
   fi
   local total=$((PASSES + FAILS))
-  printf "\n${C_BOLD}Content:${C_RESET} $PASSES/$total passed"
+  printf '\n%s' "${C_BOLD}Content:${C_RESET} $PASSES/$total passed"
   if [[ $FAILS -eq 0 ]]; then
-    printf " ${C_GREEN}(all passed)${C_RESET}"
+    printf '%s' " ${C_GREEN}(all passed)${C_RESET}"
   else
-    printf " ${C_RED}($FAILS failed)${C_RESET}"
+    printf '%s' " ${C_RED}($FAILS failed)${C_RESET}"
   fi
   printf "\n"
   # Boolean status, not a mod-256 failure count. See test-structural.sh for rationale.
   if [[ $FAILS -eq 0 ]]; then exit 0; else exit 1; fi
 }
 
-printf "\n${C_BOLD}${C_CYAN}=== Content Tests ===${C_RESET}\n\n"
+printf '\n%s\n\n' "${C_BOLD}${C_CYAN}=== Content Tests ===${C_RESET}"
 
 # --- Dependency gate ---
 # The error-catalog assertions below count lines with python3. Without this gate a
 # missing interpreter yields an empty count that reads as a content defect.
-printf "${C_BOLD}Prerequisites${C_RESET}\n"
+printf '%s\n' "${C_BOLD}Prerequisites${C_RESET}"
 if command -v python3 >/dev/null 2>&1; then
   pass "python3 is available"
 else
@@ -75,7 +78,7 @@ printf "\n"
 skill=$(cat "$SKILL_MD")
 
 # --- Valid op subcommands ---
-printf "${C_BOLD}op commands use valid subcommands${C_RESET}\n"
+printf '%s\n' "${C_BOLD}op commands use valid subcommands${C_RESET}"
 
 # Extract every line inside a fenced code block — that is where executable examples
 # live. The old extraction anchored on '^[[:space:]]*(op |`op )', so ANY prefix hid the
@@ -179,7 +182,7 @@ else
 fi
 
 # --- --reveal flag on op item get ---
-printf "\n${C_BOLD}--reveal flag on op item get examples that retrieve passwords${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}--reveal flag on op item get examples that retrieve passwords${C_RESET}"
 
 # Every 'op item get' that includes '--fields' should have --reveal (excluding comments and --format json)
 needs_reveal=$(grep -n 'op item get.*--fields' "$SKILL_MD" | grep -v -- '--reveal' | grep -v '^[0-9]*:[[:space:]]*#' | grep -v -- '--format json' || true)
@@ -191,7 +194,7 @@ else
 fi
 
 # --- --vault flag on op item get / op item list ---
-printf "\n${C_BOLD}--vault flag on op item get/list examples${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}--vault flag on op item get/list examples${C_RESET}"
 
 # Floors on the example corpus. These flag checks ARE the product — the skill exists to
 # teach --vault and --no-newline — and each extraction chain below is up to seven
@@ -263,7 +266,7 @@ else
 fi
 
 # --- --no-newline on op read ---
-printf "\n${C_BOLD}--no-newline on op read examples${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}--no-newline on op read examples${C_RESET}"
 
 op_read_lines=$(grep -n 'op read' "$SKILL_MD" | \
   grep -v '^[0-9]*:[[:space:]]*#' | \
@@ -292,7 +295,7 @@ else
 fi
 
 # --- Fish shell alternatives for process substitution ---
-printf "\n${C_BOLD}Fish shell alternatives for process substitution${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Fish shell alternatives for process substitution${C_RESET}"
 
 # Count process substitution uses: <(...)
 proc_sub_count=$(gcount '<(' "$SKILL_MD")
@@ -314,7 +317,7 @@ else
 fi
 
 # --- No \$USER variable (should be \$OP_USER) ---
-printf "\n${C_BOLD}No \$USER variable (prevents POSIX shadow ambiguity)${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No \$USER variable (prevents POSIX shadow ambiguity)${C_RESET}"
 
 # \$USER in code is suspect -- should use \$OP_USER for 1Password username variables.
 # \b is a GNU extension; anchor on surrounding context so BSD grep behaves the same.
@@ -330,7 +333,7 @@ else
 fi
 
 # --- \$CLAUDECODE variable used correctly ---
-printf "\n${C_BOLD}\$CLAUDECODE variable (not \$CLAUDE_SESSION)${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}\$CLAUDECODE variable (not \$CLAUDE_SESSION)${C_RESET}"
 
 if grep -q 'CLAUDECODE' "$SKILL_MD"; then
   pass "\$CLAUDECODE is referenced in skill"
@@ -345,7 +348,7 @@ else
 fi
 
 # --- Error catalog format ---
-printf "\n${C_BOLD}Error catalog entries format${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Error catalog entries format${C_RESET}"
 
 # Extract the Error Catalog section (between ## Error Catalog and next ## heading)
 error_catalog=$(awk '/^## Error Catalog/{f=1; next} f && /^## /{exit} f{print}' "$SKILL_MD")
@@ -419,7 +422,7 @@ else
 fi
 
 # --- Code blocks have language tags ---
-printf "\n${C_BOLD}Code blocks have language tags${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Code blocks have language tags${C_RESET}"
 
 # Use awk to track code fence state and count untagged opening fences.
 # Avoids backtick-in-regex issues by keeping the pattern in awk, not bash [[ =~ ]].
@@ -449,7 +452,7 @@ else
 fi
 
 # --- No broken markdown (unclosed code blocks) ---
-printf "\n${C_BOLD}No broken markdown${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No broken markdown${C_RESET}"
 
 # Code fences must be balanced (even count) -- already counted above
 if [[ $(( fence_count % 2 )) -eq 0 ]]; then
@@ -468,7 +471,7 @@ else
 fi
 
 # --- README install commands include mkdir -p ---
-printf "\n${C_BOLD}README install commands include mkdir -p${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}README install commands include mkdir -p${C_RESET}"
 
 readme="$REPO_ROOT/README.md"
 if [[ -f "$readme" ]]; then

@@ -15,8 +15,11 @@ for arg in "$@"; do
 done
 
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"
-  C_YELLOW="\033[0;33m"; C_BOLD="\033[1m"; C_DIM="\033[2m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) turns \033 into a real ESC byte at assignment time, so
+  # color renders whether the variable ends up in a printf FORMAT string or a %s
+  # data argument (see scripts/convert.sh for why a plain "\033[...m" is not enough).
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'
+  C_YELLOW=$'\033[0;33m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_YELLOW="" C_BOLD="" C_DIM="" C_RESET=""
 fi
@@ -73,9 +76,9 @@ now_ticks() {
 }
 
 # Header
-printf "\n${C_BOLD}${C_CYAN}1password-skill — Test Suite${C_RESET}\n"
-printf "${C_DIM}%s${C_RESET}\n" "$(date '+%Y-%m-%d %H:%M:%S')"
-printf "${C_DIM}Repo: %s${C_RESET}\n\n" "$REPO_ROOT"
+printf '\n%s\n' "${C_BOLD}${C_CYAN}1password-skill — Test Suite${C_RESET}"
+printf '%s\n' "${C_DIM}$(date '+%Y-%m-%d %H:%M:%S')${C_RESET}"
+printf '%s\n\n' "${C_DIM}Repo: ${REPO_ROOT}${C_RESET}"
 
 # Run each suite
 for i in "${!SUITE_NAMES[@]}"; do
@@ -83,7 +86,7 @@ for i in "${!SUITE_NAMES[@]}"; do
   script="${SUITE_SCRIPTS[$i]}"
 
   if [[ ! -f "$script" ]]; then
-    printf "${C_RED}MISSING${C_RESET} Test script not found: %s\n" "$script"
+    printf '%s\n' "${C_RED}MISSING${C_RESET} Test script not found: ${script}"
     SUITE_EXIT_CODES+=("127")
     SUITE_DURATIONS+=("0")
     OVERALL_EXIT=1
@@ -93,7 +96,7 @@ for i in "${!SUITE_NAMES[@]}"; do
   # Report a missing executable bit instead of silently repairing it — the runner
   # must not mutate the repo. Suites are invoked via `bash`, so the bit is optional.
   if [[ ! -x "$script" ]]; then
-    printf "  ${C_YELLOW}WARN${C_RESET} %s is not executable (chmod +x it)\n" "$script"
+    printf '%s\n' "  ${C_YELLOW}WARN${C_RESET} ${script} is not executable (chmod +x it)"
   fi
 
   start_time=$(now_ticks)
@@ -135,8 +138,7 @@ for i in "${!SUITE_NAMES[@]}"; do
   # an unparseable or zero-assertion summary as a hard error of its own.
   if [[ $total_count -eq 0 ]]; then
     unrun=$(expected_for_suite "$script")
-    printf "  ${C_RED}CRASHED${C_RESET} %s produced no summary line (exit %s) — %s assertions did not run\n" \
-      "$name" "$exit_code" "$unrun"
+    printf '%s\n' "  ${C_RED}CRASHED${C_RESET} ${name} produced no summary line (exit ${exit_code}) — ${unrun} assertions did not run"
     SUITE_EXIT_CODES[$i]=$(( exit_code == 0 ? 1 : exit_code ))
     TOTAL_FAIL=$(( TOTAL_FAIL + unrun ))
     OVERALL_EXIT=1
@@ -150,9 +152,9 @@ for i in "${!SUITE_NAMES[@]}"; do
 done
 
 # Summary table
-printf "\n${C_BOLD}${C_CYAN}╔═══════════════════════════════════════════════════╗${C_RESET}\n"
-printf "${C_BOLD}${C_CYAN}║               Test Suite Summary                  ║${C_RESET}\n"
-printf "${C_BOLD}${C_CYAN}╚═══════════════════════════════════════════════════╝${C_RESET}\n\n"
+printf '\n%s\n' "${C_BOLD}${C_CYAN}╔═══════════════════════════════════════════════════╗${C_RESET}"
+printf '%s\n' "${C_BOLD}${C_CYAN}║               Test Suite Summary                  ║${C_RESET}"
+printf '%s\n\n' "${C_BOLD}${C_CYAN}╚═══════════════════════════════════════════════════╝${C_RESET}"
 
 printf "  %-15s  %-8s  %-6s\n" "Suite" "Result" "Time"
 printf "  %-15s  %-8s  %-6s\n" "---------------" "--------" "------"
@@ -169,16 +171,16 @@ for i in "${!SUITE_NAMES[@]}"; do
   fi
 
   printf "  %-15s  " "$name"
-  printf "${result}"
+  printf '%s' "$result"
   printf "  %-6s\n" "$dur"
 done
 
-printf "\n  ${C_BOLD}Total:${C_RESET} %d passed, %d failed\n" "$TOTAL_PASS" "$TOTAL_FAIL"
+printf '\n%s\n' "  ${C_BOLD}Total:${C_RESET} ${TOTAL_PASS} passed, ${TOTAL_FAIL} failed"
 
 if [[ $OVERALL_EXIT -eq 0 ]]; then
-  printf "\n  ${C_GREEN}${C_BOLD}All tests passed.${C_RESET}\n\n"
+  printf '\n%s\n\n' "  ${C_GREEN}${C_BOLD}All tests passed.${C_RESET}"
 else
-  printf "\n  ${C_RED}${C_BOLD}Some tests failed.${C_RESET}\n\n"
+  printf '\n%s\n\n' "  ${C_RED}${C_BOLD}Some tests failed.${C_RESET}"
 fi
 
 exit $OVERALL_EXIT

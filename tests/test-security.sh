@@ -21,13 +21,16 @@ EXPECTED_MIN_ASSERTIONS=25
 
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"; C_BOLD="\033[1m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) turns \033 into a real ESC byte at assignment time, so
+  # color renders whether the variable ends up in a printf FORMAT string or a %s
+  # data argument (see scripts/convert.sh for why a plain "\033[...m" is not enough).
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_BOLD="" C_RESET=""
 fi
 
-pass() { PASSES=$((PASSES + 1)); printf "  ${C_GREEN}PASS${C_RESET} %s\n" "$1"; }
-fail() { FAILS=$((FAILS + 1));  printf "  ${C_RED}FAIL${C_RESET} %s\n" "$1"; }
+pass() { PASSES=$((PASSES + 1)); printf '%s\n' "  ${C_GREEN}PASS${C_RESET} $1"; }
+fail() { FAILS=$((FAILS + 1));  printf '%s\n' "  ${C_RED}FAIL${C_RESET} $1"; }
 
 summary_and_exit() {
   # Enforce the assertion floor on EVERY exit path, including the early
@@ -41,18 +44,18 @@ summary_and_exit() {
     fail "Suite ran only $_ran assertions (expected >= $EXPECTED_MIN_ASSERTIONS) -- assertion blocks were skipped"
   fi
   local total=$((PASSES + FAILS))
-  printf "\n${C_BOLD}Security:${C_RESET} $PASSES/$total passed"
+  printf '\n%s' "${C_BOLD}Security:${C_RESET} $PASSES/$total passed"
   if [[ $FAILS -eq 0 ]]; then
-    printf " ${C_GREEN}(all passed)${C_RESET}"
+    printf '%s' " ${C_GREEN}(all passed)${C_RESET}"
   else
-    printf " ${C_RED}($FAILS failed)${C_RESET}"
+    printf '%s' " ${C_RED}($FAILS failed)${C_RESET}"
   fi
   printf "\n"
   # Boolean status, not a mod-256 failure count. See test-structural.sh for rationale.
   if [[ $FAILS -eq 0 ]]; then exit 0; else exit 1; fi
 }
 
-printf "\n${C_BOLD}${C_CYAN}=== Security Tests ===${C_RESET}\n\n"
+printf '\n%s\n\n' "${C_BOLD}${C_CYAN}=== Security Tests ===${C_RESET}"
 
 # Collect all tracked files that are part of the published skill content.
 # Exclude the tests/ directory — test scripts necessarily reference the patterns
@@ -62,7 +65,7 @@ printf "\n${C_BOLD}${C_CYAN}=== Security Tests ===${C_RESET}\n\n"
 # `... || true` pipeline (git absent, not a work tree, xargs failure) produced an
 # empty list, and an empty list made every negative scan below report "clean". A
 # secret scanner that silently disables itself is worse than no scanner.
-printf "${C_BOLD}Scan corpus${C_RESET}\n"
+printf '%s\n' "${C_BOLD}Scan corpus${C_RESET}"
 
 git_ls_status=0
 raw_files=$(git -C "$REPO_ROOT" ls-files --cached --others --exclude-standard 2>/dev/null) || git_ls_status=$?
@@ -159,7 +162,7 @@ else
 fi
 
 # --- IP addresses ---
-printf "\n${C_BOLD}No real IP addresses${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No real IP addresses${C_RESET}"
 
 # Match IPv4 pattern, exclude localhost, link-local, documentation ranges, and placeholder examples
 ip_matches=$(scan_files \
@@ -174,7 +177,7 @@ else
 fi
 
 # --- Real hostnames ---
-printf "\n${C_BOLD}No real hostnames${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No real hostnames${C_RESET}"
 
 for hostname in "gondolin" "tailf4273"; do
   matches=$(scan_files "$hostname" || true)
@@ -196,7 +199,7 @@ else
 fi
 
 # --- 1Password item IDs (26-char alphanumeric) ---
-printf "\n${C_BOLD}No 1Password item IDs${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No 1Password item IDs${C_RESET}"
 
 # 1P item IDs are exactly 26 alphanumeric chars (mixed case).
 # \b is a GNU extension with no portable ERE equivalent (BSD grep treats it as a
@@ -210,7 +213,7 @@ else
 fi
 
 # --- Real usernames ---
-printf "\n${C_BOLD}No real usernames in skill content${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No real usernames in skill content${C_RESET}"
 
 # pmcdade and petejm should only appear as public publishing identifiers: the LICENSE
 # copyright line, the GitHub clone/repo URL, and the plugin marketplace name used in the
@@ -236,7 +239,7 @@ for username in "pmcdade" "petejm"; do
 done
 
 # --- API tokens / key prefixes ---
-printf "\n${C_BOLD}No API tokens or key material${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No API tokens or key material${C_RESET}"
 
 token_patterns=(
   'sk-[A-Za-z0-9]{20,}'
@@ -257,7 +260,7 @@ for pattern in "${token_patterns[@]}"; do
 done
 
 # --- Hardcoded home directory paths ---
-printf "\n${C_BOLD}No hardcoded home directory paths${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No hardcoded home directory paths${C_RESET}"
 
 # /home/username/ or /Users/username/ with a real username (not example)
 home_matches=$(scan_files '/home/[a-z][a-z0-9_-]+/' \
@@ -279,7 +282,7 @@ else
 fi
 
 # --- .env files committed ---
-printf "\n${C_BOLD}No .env files committed${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No .env files committed${C_RESET}"
 
 env_files=$(git -C "$REPO_ROOT" ls-files --cached 2>/dev/null | grep -E '(^|/)\.env$' || true)
 if [[ -z "$env_files" ]]; then
@@ -289,7 +292,7 @@ else
 fi
 
 # --- environment.md must not be committed ---
-printf "\n${C_BOLD}environment.md not committed${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}environment.md not committed${C_RESET}"
 
 env_md=$(git -C "$REPO_ROOT" ls-files --cached 2>/dev/null | grep 'environment\.md' || true)
 if [[ -z "$env_md" ]]; then
@@ -306,7 +309,7 @@ else
 fi
 
 # --- op:// references use only placeholder names ---
-printf "\n${C_BOLD}op:// references use placeholder names only${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}op:// references use placeholder names only${C_RESET}"
 
 # Allowed: VaultName, ItemName, Vault, MyVault, DevVault, ExternalAPI, PostgreSQL,
 #          GitHub, fieldname, credential, field, username, password, key, connection-string, token
@@ -328,7 +331,7 @@ else
 fi
 
 # --- SSH private key material ---
-printf "\n${C_BOLD}No SSH private key material${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}No SSH private key material${C_RESET}"
 
 ssh_key_matches=$(scan_files 'BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY' || true)
 if [[ -z "$ssh_key_matches" ]]; then
@@ -339,7 +342,7 @@ else
 fi
 
 # --- .gitignore blocks sensitive files ---
-printf "\n${C_BOLD}.gitignore blocks sensitive files${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}.gitignore blocks sensitive files${C_RESET}"
 
 gitignore="$REPO_ROOT/.gitignore"
 if [[ -f "$gitignore" ]]; then

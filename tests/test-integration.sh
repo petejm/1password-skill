@@ -26,17 +26,20 @@ FAILS=0
 # one of them trips the floor. A number with slack in it is not a floor. Adding
 # assertions is a deliberate bump of this line. run-all.sh greps this exact assignment
 # out of the file, so keep it on one line with no spaces.
-EXPECTED_MIN_ASSERTIONS=64
+EXPECTED_MIN_ASSERTIONS=66
 
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"; C_BOLD="\033[1m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) turns \033 into a real ESC byte at assignment time, so
+  # color renders whether the variable ends up in a printf FORMAT string or a %s
+  # data argument (see scripts/convert.sh for why a plain "\033[...m" is not enough).
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_BOLD="" C_RESET=""
 fi
 
-pass() { PASSES=$((PASSES + 1)); printf "  ${C_GREEN}PASS${C_RESET} %s\n" "$1"; }
-fail() { FAILS=$((FAILS + 1));  printf "  ${C_RED}FAIL${C_RESET} %s\n" "$1"; }
+pass() { PASSES=$((PASSES + 1)); printf '%s\n' "  ${C_GREEN}PASS${C_RESET} $1"; }
+fail() { FAILS=$((FAILS + 1));  printf '%s\n' "  ${C_RED}FAIL${C_RESET} $1"; }
 
 summary_and_exit() {
   # Enforce the assertion floor on EVERY exit path, including the early
@@ -50,11 +53,11 @@ summary_and_exit() {
     fail "Suite ran only $_ran assertions (expected >= $EXPECTED_MIN_ASSERTIONS) -- assertion blocks were skipped"
   fi
   local total=$((PASSES + FAILS))
-  printf "\n${C_BOLD}Integration:${C_RESET} $PASSES/$total passed"
+  printf '\n%s' "${C_BOLD}Integration:${C_RESET} $PASSES/$total passed"
   if [[ $FAILS -eq 0 ]]; then
-    printf " ${C_GREEN}(all passed)${C_RESET}"
+    printf '%s' " ${C_GREEN}(all passed)${C_RESET}"
   else
-    printf " ${C_RED}($FAILS failed)${C_RESET}"
+    printf '%s' " ${C_RED}($FAILS failed)${C_RESET}"
   fi
   printf "\n"
   # Boolean status, not a mod-256 failure count: `exit $FAILS` would exit 0 on exactly
@@ -69,10 +72,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-printf "\n${C_BOLD}${C_CYAN}=== Integration Tests ===${C_RESET}\n\n"
+printf '\n%s\n\n' "${C_BOLD}${C_CYAN}=== Integration Tests ===${C_RESET}"
 
 # --- Prerequisites ---
-printf "${C_BOLD}Prerequisites${C_RESET}\n"
+printf '%s\n' "${C_BOLD}Prerequisites${C_RESET}"
 
 if command -v python3 >/dev/null 2>&1; then
   pass "python3 is available"
@@ -154,7 +157,7 @@ assert_untouched() {
 }
 
 # --- Script basics ---
-printf "\n${C_BOLD}convert.sh basics${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}convert.sh basics${C_RESET}"
 
 if [[ -f "$CONVERT_SH" ]]; then
   pass "convert.sh exists"
@@ -173,7 +176,7 @@ fi
 # convert.sh derives its output base from its own location ($script_dir/../integrations),
 # so running a COPY of the repo's scripts/ + skills/ inside a temp dir redirects every
 # write there. Nothing under the tracked integrations/ directory is modified.
-printf "\n${C_BOLD}Staging tree (suite is read-only on the repo)${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Staging tree (suite is read-only on the repo)${C_RESET}"
 
 # Snapshot of the working tree, taken BEFORE anything runs. `git status --porcelain`
 # lists modified tracked files AND untracked ones (`??`), so a stray write anywhere
@@ -199,15 +202,17 @@ fi
 
 STAGE_CONVERT="$STAGE/scripts/convert.sh"
 
-# Wrapper: run the STAGED convert.sh without inheriting NO_COLOR (convert.sh has a
-# printf bug with NO_COLOR). Invoked via `bash` so the executable bit is asserted
-# independently rather than being a precondition for every other test.
+# Wrapper: run the STAGED convert.sh. Invoked via `bash` (rather than executing it
+# directly) so the executable bit is asserted as its own test below instead of being
+# a silent precondition for every other test in this suite. convert.sh's printf calls
+# use a literal format string, so this runs correctly under any NO_COLOR/TERM
+# combination -- no environment scrubbing needed here.
 run_convert() {
-  env -u NO_COLOR bash "$STAGE_CONVERT" "$@"
+  bash "$STAGE_CONVERT" "$@"
 }
 
 # --- --help exits 0 ---
-printf "\n${C_BOLD}convert.sh --help${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}convert.sh --help${C_RESET}"
 
 if run_convert --help >/dev/null 2>&1; then
   pass "convert.sh --help exits 0"
@@ -216,12 +221,43 @@ else
 fi
 
 # --- Full run produces all 4 outputs ---
-printf "\n${C_BOLD}Full conversion run (all 4 outputs)${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Full conversion run (all 4 outputs)${C_RESET}"
 
 if run_convert >/dev/null 2>&1; then
   pass "convert.sh runs without error"
 else
   fail "convert.sh runs without error"
+fi
+
+# --- Regression guard: convert.sh must not assume a real terminal ---
+# This is the exact CI failure this suite exists to catch. CI runners set no TERM at
+# all, so convert.sh's color-detection branch leaves every C_* variable empty. A
+# printf whose format string starts with one of those (now-empty) variables followed
+# by literal text beginning with '-' (e.g. step()'s "-->") is then parsed by printf
+# as an option instead of a format string, and the script dies under `set -euo
+# pipefail` before writing a single byte -- zero integrations generated, every
+# downstream assertion in this suite fails with it. Every printf call above runs
+# with TERM inherited from this interactive/CI shell, which is always set to
+# *something*, so none of them exercise this path. Only an explicit `env -u TERM`
+# invocation reproduces it. Writes to a private OUT_BASE so it cannot collide with
+# the $STAGE/integrations tree the rest of this suite depends on.
+printf '\n%s\n' "${C_BOLD}No-TERM regression (env -u TERM)${C_RESET}"
+
+NOTERM_OUT="$STAGE/no-term-integrations"
+NOTERM_EXIT=0
+env -u TERM OUT_BASE="$NOTERM_OUT" bash "$STAGE_CONVERT" >/dev/null 2>&1 || NOTERM_EXIT=$?
+
+if [[ $NOTERM_EXIT -eq 0 ]]; then
+  pass "convert.sh exits 0 with TERM unset"
+else
+  fail "convert.sh exits 0 with TERM unset (exit $NOTERM_EXIT) -- a variable-led printf format string likely collapsed to an option flag"
+fi
+
+NOTERM_GEMINI="$NOTERM_OUT/gemini-cli/skills/1password/SKILL.md"
+if [[ -s "$NOTERM_GEMINI" ]]; then
+  pass "convert.sh with TERM unset generated non-empty output ($NOTERM_GEMINI)"
+else
+  fail "convert.sh with TERM unset generated no output (or empty output) at $NOTERM_GEMINI"
 fi
 
 # Parallel indexed arrays -- NOT `declare -A`, which bash 3.2 (the macOS system bash
@@ -252,7 +288,7 @@ GEN_WINDSURF="$STAGE/${TOOL_RELPATHS[3]}"
 # integrations/** is generated, never hand-edited. Regenerating before asserting (what
 # this suite used to do) means a stale or corrupt COMMITTED artifact can never fail a
 # test. Diff the committed bytes against the staged bytes instead.
-printf "\n${C_BOLD}Committed integrations/** are up to date${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Committed integrations/** are up to date${C_RESET}"
 
 for i in 0 1 2 3; do
   name="${TOOL_NAMES[$i]}"
@@ -274,7 +310,7 @@ for i in 0 1 2 3; do
 done
 
 # --- Gemini CLI output: preserves YAML frontmatter ---
-printf "\n${C_BOLD}Gemini CLI output${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Gemini CLI output${C_RESET}"
 
 if [[ -f "$GEN_GEMINI" ]]; then
   if grep -q '^name:' "$GEN_GEMINI"; then
@@ -302,7 +338,7 @@ else
 fi
 
 # --- Cursor .mdc: correct frontmatter ---
-printf "\n${C_BOLD}Cursor .mdc output${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Cursor .mdc output${C_RESET}"
 
 if [[ -f "$GEN_CURSOR" ]]; then
   if grep -q '^description:' "$GEN_CURSOR"; then
@@ -371,7 +407,7 @@ else
 fi
 
 # --- Aider CONVENTIONS.md: no YAML frontmatter ---
-printf "\n${C_BOLD}Aider CONVENTIONS.md output${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Aider CONVENTIONS.md output${C_RESET}"
 
 if [[ -f "$GEN_AIDER" ]]; then
   first_line=$(head -1 "$GEN_AIDER")
@@ -400,7 +436,7 @@ else
 fi
 
 # --- Windsurf .windsurfrules: no YAML frontmatter ---
-printf "\n${C_BOLD}Windsurf .windsurfrules output${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Windsurf .windsurfrules output${C_RESET}"
 
 if [[ -f "$GEN_WINDSURF" ]]; then
   first_line=$(head -1 "$GEN_WINDSURF")
@@ -429,7 +465,7 @@ else
 fi
 
 # --- All 4 outputs contain Decision Router and Error Catalog ---
-printf "\n${C_BOLD}All outputs contain required sections${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}All outputs contain required sections${C_RESET}"
 
 for i in 0 1 2 3; do
   name="${TOOL_NAMES[$i]}"
@@ -460,7 +496,7 @@ for i in 0 1 2 3; do
 done
 
 # --- File sizes are reasonable (>5KB) ---
-printf "\n${C_BOLD}Output file sizes are reasonable (>5KB)${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Output file sizes are reasonable (>5KB)${C_RESET}"
 
 for i in 0 1 2 3; do
   name="${TOOL_NAMES[$i]}"
@@ -481,7 +517,7 @@ for i in 0 1 2 3; do
 done
 
 # --- Idempotency: running convert.sh twice produces identical output ---
-printf "\n${C_BOLD}Idempotency (running convert.sh twice produces identical output)${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Idempotency (running convert.sh twice produces identical output)${C_RESET}"
 
 before_sums=("" "" "" "")
 for i in 0 1 2 3; do
@@ -527,7 +563,7 @@ for i in 0 1 2 3; do
 done
 
 # --- --tool cursor only generates cursor output ---
-printf "\n${C_BOLD}--tool cursor generates only cursor output${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}--tool cursor generates only cursor output${C_RESET}"
 
 ts_gemini=$(mtime_of "$GEN_GEMINI")
 ts_aider=$(mtime_of "$GEN_AIDER")
@@ -564,7 +600,7 @@ assert_untouched "Windsurf" "$ts_windsurf" "$ts_windsurf_after"
 # apostrophe, and the committed-vs-generated diff compares two artifacts that would be
 # truncated identically. Drive convert.sh with synthetic sources instead, and assert
 # both that the .mdc frontmatter parses as YAML AND that the description round-trips.
-printf "\n${C_BOLD}Description round-trips through hostile frontmatter${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Description round-trips through hostile frontmatter${C_RESET}"
 
 FIXTURE_N=0
 FIXTURE_NAME=()
@@ -694,7 +730,7 @@ while [[ $_fix_i -lt $FIXTURE_N ]]; do
     fail "fixture [$fx_label]: PyYAML not installed -- cannot verify the generated description (pip install pyyaml)"
     continue
   fi
-  if ! env -u NO_COLOR bash "$fx_dir/scripts/convert.sh" --tool cursor >/dev/null 2>&1; then
+  if ! bash "$fx_dir/scripts/convert.sh" --tool cursor >/dev/null 2>&1; then
     fail "fixture [$fx_label]: convert.sh --tool cursor exited non-zero"
     continue
   fi
@@ -734,7 +770,7 @@ done
 # --- Repo was not mutated ---
 # This used to assert `[[ -d "$STAGE/integrations" ]]` -- a fact about the STAGING
 # tree, carrying no information at all about $REPO_ROOT. Read the repo instead.
-printf "\n${C_BOLD}Suite did not mutate the repo${C_RESET}\n"
+printf '\n%s\n' "${C_BOLD}Suite did not mutate the repo${C_RESET}"
 
 REPO_STATE_AFTER=""
 _after_status=0

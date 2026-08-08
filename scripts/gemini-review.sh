@@ -21,8 +21,11 @@ trap cleanup EXIT
 
 # Color output
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"
-  C_YELLOW="\033[0;33m"; C_BOLD="\033[1m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) turns \033 into a real ESC byte at assignment time, so
+  # color renders whether the variable ends up in a printf FORMAT string or a %s
+  # data argument (see scripts/convert.sh for why a plain "\033[...m" is not enough).
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'
+  C_YELLOW=$'\033[0;33m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_YELLOW="" C_BOLD="" C_RESET=""
 fi
@@ -377,10 +380,10 @@ print_header() {
   local timestamp
   timestamp=$(date '+%Y-%m-%d %H:%M:%S %Z')
   echo ""
-  printf "${C_CYAN}${C_BOLD}═══════════════════════════════════════════════════${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}  Gemini TR Review — %s (%s)${C_RESET}\n" "$reviewer" "$MODEL"
-  printf "${C_CYAN}  %s${C_RESET}\n" "$timestamp"
-  printf "${C_CYAN}${C_BOLD}═══════════════════════════════════════════════════${C_RESET}\n"
+  printf '%s\n' "${C_CYAN}${C_BOLD}═══════════════════════════════════════════════════${C_RESET}"
+  printf '%s\n' "${C_CYAN}${C_BOLD}  Gemini TR Review — ${reviewer} (${MODEL})${C_RESET}"
+  printf '%s\n' "${C_CYAN}  ${timestamp}${C_RESET}"
+  printf '%s\n' "${C_CYAN}${C_BOLD}═══════════════════════════════════════════════════${C_RESET}"
   echo ""
 }
 
@@ -390,16 +393,15 @@ print_footer() {
   local output_tokens="$2"
   local cost="$3"
   echo ""
-  printf "${C_YELLOW}───────────────────────────────────────────────────${C_RESET}\n"
-  printf "${C_YELLOW}  Tokens: %s in / %s out${C_RESET}\n" \
-    "$(fmt_tokens "$input_tokens")" "$(fmt_tokens "$output_tokens")"
+  printf '%s\n' "${C_YELLOW}───────────────────────────────────────────────────${C_RESET}"
+  printf '%s\n' "${C_YELLOW}  Tokens: $(fmt_tokens "$input_tokens") in / $(fmt_tokens "$output_tokens") out${C_RESET}"
   if [[ "$cost" == "unknown" ]]; then
-    printf "${C_YELLOW}  Cost: unknown — no rate on file for %s${C_RESET}\n" "$MODEL"
-    printf "${C_YELLOW}         set GEMINI_PRICE_IN / GEMINI_PRICE_OUT (see %s)${C_RESET}\n" "$PRICING_URL"
+    printf '%s\n' "${C_YELLOW}  Cost: unknown — no rate on file for ${MODEL}${C_RESET}"
+    printf '%s\n' "${C_YELLOW}         set GEMINI_PRICE_IN / GEMINI_PRICE_OUT (see ${PRICING_URL})${C_RESET}"
   else
-    printf "${C_YELLOW}  Cost: ~\$%s (estimate; %s)${C_RESET}\n" "$cost" "$PRICE_NOTE"
+    printf '%s\n' "${C_YELLOW}  Cost: ~\$${cost} (estimate; ${PRICE_NOTE})${C_RESET}"
   fi
-  printf "${C_YELLOW}───────────────────────────────────────────────────${C_RESET}\n"
+  printf '%s\n' "${C_YELLOW}───────────────────────────────────────────────────${C_RESET}"
   echo ""
 }
 
@@ -418,7 +420,7 @@ run_reviewer() {
 
   print_header "$reviewer"
 
-  printf "${C_GREEN}Calling Gemini API (model: %s)...${C_RESET}\n\n" "$MODEL"
+  printf '%s\n\n' "${C_GREEN}Calling Gemini API (model: ${MODEL})...${C_RESET}"
 
   local raw_response
   raw_response="$(call_gemini_raw "$prompt")"
@@ -433,7 +435,7 @@ run_reviewer() {
   local finish_reason
   finish_reason="$(extract_finish_reason "$raw_response")"
   if [[ "$finish_reason" != "STOP" ]]; then
-    printf "${C_RED}Error: review incomplete — finishReason=%s${C_RESET}\n" "$finish_reason" >&2
+    printf '%s\n' "${C_RED}Error: review incomplete — finishReason=${finish_reason}${C_RESET}" >&2
     if [[ "$finish_reason" == "MAX_TOKENS" ]]; then
       echo "  Thinking tokens count against the output budget. Retry with a larger one:" >&2
       echo "  GEMINI_MAX_OUTPUT_TOKENS=$((MAX_OUTPUT_TOKENS * 2)) $0 --reviewer $reviewer" >&2
@@ -441,7 +443,7 @@ run_reviewer() {
     exit 1
   fi
   if [[ -z "$review_text" ]]; then
-    printf "${C_RED}Error: Gemini returned no review text${C_RESET}\n" >&2
+    printf '%s\n' "${C_RED}Error: Gemini returned no review text${C_RESET}" >&2
     exit 1
   fi
 
@@ -485,9 +487,9 @@ run_all() {
   total_cost="$(awk -v a="$total_cost" 'BEGIN { printf "%.4f\n", a }')"
 
   echo ""
-  printf "${C_BOLD}╔═══════════════════════════════════════════════════╗${C_RESET}\n"
-  printf "${C_BOLD}║           Gemini TR Summary                       ║${C_RESET}\n"
-  printf "${C_BOLD}╚═══════════════════════════════════════════════════╝${C_RESET}\n"
+  printf '%s\n' "${C_BOLD}╔═══════════════════════════════════════════════════╗${C_RESET}"
+  printf '%s\n' "${C_BOLD}║           Gemini TR Summary                       ║${C_RESET}"
+  printf '%s\n' "${C_BOLD}╚═══════════════════════════════════════════════════╝${C_RESET}"
   echo ""
   printf "  %-10s  %-18s  %-13s  %s\n" "Reviewer" "Model" "Tokens" "Cost"
   printf "  %-10s  %-18s  %-13s  %s\n" "---------" "----------------" "-----------" "------"

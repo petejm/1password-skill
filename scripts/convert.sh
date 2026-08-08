@@ -17,13 +17,20 @@ OUT_BASE="${OUT_BASE:-$REPO_ROOT/integrations}"
 
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
-  C_GREEN="\033[0;32m"; C_RED="\033[0;31m"; C_CYAN="\033[0;36m"; C_RESET="\033[0m"
+  # $'...' (ANSI-C quoting) so bash turns \033 into a real ESC byte at assignment
+  # time. A plain double-quoted "\033[...m" is inert literal text; it only became a
+  # color code before because it sat directly in a printf FORMAT string, which
+  # applies its own backslash-escape parsing. Passing that same literal text through
+  # %s (the fix for the SC2059 printf bug below) skips escape parsing entirely, so
+  # the old double-quoted form would have printed the four characters \033 instead
+  # of rendering color. $'...' makes the byte real regardless of where it lands.
+  C_GREEN=$'\033[0;32m'; C_RED=$'\033[0;31m'; C_CYAN=$'\033[0;36m'; C_RESET=$'\033[0m'
 else
   C_GREEN="" C_RED="" C_CYAN="" C_RESET=""
 fi
-info()  { printf "${C_GREEN}[OK]${C_RESET}   %s\n" "$*"; }
-error() { printf "${C_RED}[ERR]${C_RESET}  %s\n" "$*" >&2; }
-step()  { printf "${C_CYAN}-->${C_RESET}    %s\n" "$*"; }
+info()  { printf '%s\n' "${C_GREEN}[OK]${C_RESET}   $*"; }
+error() { printf '%s\n' "${C_RED}[ERR]${C_RESET}  $*" >&2; }
+step()  { printf '%s\n' "${C_CYAN}-->${C_RESET}    $*"; }
 
 # Path of the artifact currently being written. Every converter writes to a temp file
 # in the destination directory and renames it into place only after its assertions
