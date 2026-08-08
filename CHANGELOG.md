@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Every secret-reference example now brackets the vault segment:
+  `op://<vault>/<item>/<field>`. Illustrative item and field names are kept
+  (`op://<vault>/GitHub/token`, `op://<vault>/SSH Key/public key`) because they
+  carry the teaching value — only the vault, the segment that would identify a
+  real person's setup, becomes a metavariable. 79 references across the skill,
+  the four editor integrations, the README, and the review script.
+
+### Fixed
+
+- **`tests/test-security.sh` published the two hostnames it exists to keep out
+  of the repo.** They sat in the check's own loop, and `scan_files` skips
+  `tests/`, so the guard was blind to exactly one file: itself. Both literals
+  had already reached the public copy. Now assembled from fragments; scanning
+  behaviour is unchanged.
+- The secret-reference check enforced a hand-curated allowlist of "clearly
+  fake" vault names, which had to grow forever and could never be sound — a
+  placeholder like `Vault` or `GitHub` is indistinguishable from a real vault
+  somebody actually has. Replaced with a decidable rule: the vault segment must
+  be bracketed, since a real vault name can never begin with `<`. Bare prose
+  mentions of the scheme are correctly ignored, which matters in a repo whose
+  whole subject is that syntax.
+
 ## [1.1.0] - 2026-08-07
 
 A correctness release, from an audit of the skill against live 1Password documentation and

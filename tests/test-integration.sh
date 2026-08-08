@@ -711,10 +711,10 @@ FIXEOF
 
 # A pipe that is NOT a block indicator: the value is plain text ending in a pipe
 # expression, and must not be parsed as the start of a block scalar.
-make_fixture "single-line value containing a pipe" "op read op://Vault/Item/field | tr -d ' '" <<'FIXEOF'
+make_fixture "single-line value containing a pipe" "op read op://<vault>/<item>/<field> | tr -d ' '" <<'FIXEOF'
 ---
 name: fixture
-description: op read op://Vault/Item/field | tr -d ' '
+description: op read op://<vault>/<item>/<field> | tr -d ' '
 ---
 
 # Fixture

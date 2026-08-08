@@ -149,10 +149,10 @@ Code examples that use process substitution carry both a **bash/zsh** and a **Fi
 
 ```bash
 # bash/zsh
-op run --env-file=<(echo "KEY=op://Vault/Item/field") -- ./app
+op run --env-file=<(echo "KEY=op://<vault>/<item>/<field>") -- ./app
 
 # Fish
-op run --env-file=(echo "KEY=op://Vault/Item/field" | psub) -- ./app
+op run --env-file=(echo "KEY=op://<vault>/<item>/<field>" | psub) -- ./app
 ```
 
 Other examples are written for bash/zsh only. The two translations you will need most often: `export VAR=value` is `set -gx VAR value` in Fish, and command substitution is `(...)`.

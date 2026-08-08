@@ -179,7 +179,13 @@ fi
 # --- Real hostnames ---
 printf '\n%s\n' "${C_BOLD}No real hostnames${C_RESET}"
 
-for hostname in "gondolin" "tailf4273"; do
+# Assembled from fragments so this file does not itself publish the names it
+# exists to keep out of the repo. It previously did: both literals reached the
+# public GitHub copy and this check could never see them, because scan_files
+# skips tests/ — so the guard was blind to precisely one file, its own.
+# The loop variable still holds the full name, so scanning behaviour is
+# unchanged.
+for hostname in "gondo""lin" "tail""f4273"; do
   matches=$(scan_files "$hostname" || true)
   if [[ -z "$matches" ]]; then
     pass "No reference to hostname '$hostname'"
@@ -308,25 +314,30 @@ else
   fail "environment.md must not exist in repo (it's gitignored for a reason)"
 fi
 
-# --- op:// references use only placeholder names ---
-printf '\n%s\n' "${C_BOLD}op:// references use placeholder names only${C_RESET}"
+# --- secret references bracket the vault segment ---
+printf '\n%s\n' "${C_BOLD}secret references bracket the vault segment${C_RESET}"
 
-# Allowed: VaultName, ItemName, Vault, MyVault, DevVault, ExternalAPI, PostgreSQL,
-#          GitHub, fieldname, credential, field, username, password, key, connection-string, token
-# Disallowed: Production and Private (real vault names people use), and anything that looks like personal infrastructure
-op_refs=$(scan_files 'op://[A-Za-z]' || true)
-# Check if any op:// reference uses what looks like a real vault name.
-# Allowed: VaultName, Vault, MyVault, DevVault, ExternalAPI, Item, ItemName, GitHub, PostgreSQL, Field (clearly-fake placeholders)
-# Also allow: op://vault/item/field (the generic all-lowercase documentation placeholder)
-# Disallowed: Production and Private — these are real vault names people commonly use
-suspicious_op=$(echo "$op_refs" | \
-  grep -E 'op://[A-Za-z]' | \
-  grep -vE 'op://(VaultName|Vault|MyVault|DevVault|YourVault|ExternalAPI|ItemName|Item|GitHub|PostgreSQL|Field)/' | \
-  grep -vE 'op://vault/item/field' || true)
+# Replaces a hand-curated allowlist of "clearly fake" vault names (VaultName,
+# MyVault, DevVault, ...). That list had to grow forever and could never be
+# sound: a placeholder like Vault or GitHub is indistinguishable from a real
+# vault somebody actually has. Bracketing is DECIDABLE rather than enumerated,
+# because a real vault name can never begin with '<'.
+#
+# Leak-shaped = the scheme followed by an unbracketed segment and a '/'. A bare
+# prose mention has no path and is correctly ignored, which matters a great deal
+# in a repo whose entire subject is this syntax -- you cannot write about the
+# scheme without naming it.
+#
+# The pattern is assembled from parts so this file never contains the literal
+# string it searches for. An exclusion for tests/ would work too, but it would
+# also hide a genuine finding in the test suite itself.
+_op_scheme='op:'
+_op_leak="${_op_scheme}//[^<[:space:]]+/"
+suspicious_op=$(scan_files "$_op_leak" || true)
 if [[ -z "$suspicious_op" ]]; then
-  pass "op:// references use placeholder vault/item names"
+  pass "secret references write the vault as <vault>"
 else
-  fail "op:// references may contain real vault/item names (review carefully)"
+  fail "secret references must write the vault as <vault> (found unbracketed)"
   echo "$suspicious_op" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       %s\n" "$line"; done
 fi
 
