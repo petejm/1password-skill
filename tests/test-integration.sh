@@ -223,10 +223,20 @@ fi
 # --- Full run produces all 4 outputs ---
 printf '\n%s\n' "${C_BOLD}Full conversion run (all 4 outputs)${C_RESET}"
 
-if run_convert >/dev/null 2>&1; then
+# Capture rather than discard. A bare `>/dev/null 2>&1` reports THAT convert.sh
+# failed while throwing away the only thing that explains WHY, which turns any
+# environment-specific failure (a CI runner, a different awk, an unset TERM)
+# into a guessing game against a remote log. On failure the captured output is
+# echoed, indented, so the reason travels with the failure.
+_convert_out="$(run_convert 2>&1)"
+_convert_rc=$?
+if [ "$_convert_rc" -eq 0 ]; then
   pass "convert.sh runs without error"
 else
-  fail "convert.sh runs without error"
+  fail "convert.sh runs without error (exit $_convert_rc)"
+  printf '%s\n' "    --- convert.sh output (exit $_convert_rc) ---"
+  printf '%s\n' "$_convert_out" | sed 's/^/    /'
+  printf '%s\n' "    --- end convert.sh output ---"
 fi
 
 # --- Regression guard: convert.sh must not assume a real terminal ---
