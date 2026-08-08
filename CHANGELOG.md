@@ -98,9 +98,8 @@ strings that do not exist.
 - Vault name sanitization in `gemini-review.sh`
 - Dynamic Cursor description extraction from multiline YAML block scalars; corrected Gemini CLI install path in README
 
-<!--
-Keep a Changelog comparison links are omitted deliberately: this repo publishes no tags,
-so every `compare/vX.Y.Z...` and `releases/tag/vX.Y.Z` URL returned 404 (verified 2026-08-07).
-Restore the link references below once v1.0.0 / v1.0.1 / v1.0.2 / v1.1.0 are tagged and pushed.
--->
+[1.1.0]: https://github.com/petejm/1password-skill/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/petejm/1password-skill/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/petejm/1password-skill/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/petejm/1password-skill/releases/tag/v1.0.0
 
