@@ -115,7 +115,7 @@ invalid_subcmds=("op login" "op list " "op fetch" "op get " "op secret ")
 for subcmd in "${invalid_subcmds[@]}"; do
   if [[ "$op_line_count" -eq 0 ]]; then
     fail "Cannot check for invalid subcommand '$subcmd' — no op command lines were extracted"
-  elif printf '%s\n' "$op_lines" | grep -qF "$subcmd"; then
+  elif grep -qF "$subcmd" <<< "$op_lines"; then
     fail "Invalid/deprecated op subcommand used: '$subcmd'"
   else
     pass "No invalid subcommand '$subcmd'"
@@ -160,7 +160,7 @@ for subcmd in "${example_subcmds[@]}"; do
     # "Nothing to read" must never read as "clean" -- with no extracted lines every
     # check below would report a missing example, but say WHY rather than blaming content.
     fail "Cannot verify '$subcmd' usage — no executable lines extracted from shell code blocks"
-  elif printf '%s\n' "$shell_block_lines" | grep -qE "(^|[^A-Za-z0-9_.-])$subcmd([^A-Za-z0-9_-]|\$)"; then
+  elif grep -qE "(^|[^A-Za-z0-9_.-])$subcmd([^A-Za-z0-9_-]|\$)" <<< "$shell_block_lines"; then
     pass "Valid subcommand '$subcmd' is invoked in a shell code-block example"
   else
     fail "Valid subcommand '$subcmd' is never invoked in a shell code-block example (a prose mention is not usage)"

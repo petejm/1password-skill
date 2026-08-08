@@ -110,13 +110,13 @@ printf '\n%s\n' "${C_BOLD}YAML frontmatter${C_RESET}"
 # Extract content between first pair of ---
 frontmatter=$(awk '/^---/{c++; if(c>2) exit} c==1 && !/^---/{print}' "$SKILL_MD")
 
-if echo "$frontmatter" | grep -qE '^name:'; then
+if grep -qE '^name:' <<< "$frontmatter"; then
   pass "frontmatter has 'name' field"
 else
   fail "frontmatter has 'name' field"
 fi
 
-if echo "$frontmatter" | grep -qE '^description:'; then
+if grep -qE '^description:' <<< "$frontmatter"; then
   pass "frontmatter has 'description' field"
 else
   fail "frontmatter has 'description' field"
@@ -198,7 +198,7 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 print(d.get('version', ''))
 " "$PLUGIN_JSON" 2>/dev/null)
-  if echo "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  if grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' <<< "$version"; then
     pass "plugin.json version follows semver ($version)"
   else
     fail "plugin.json version follows semver (got: '$version')"

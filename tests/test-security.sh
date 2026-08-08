@@ -17,7 +17,7 @@ FAILS=0
 # shrinks the denominator invisibly. Keep this EQUAL to the number of assertions the
 # suite actually runs: a floor with slack in it is not a floor. run-all.sh greps this
 # exact assignment out of the file, so keep it on one line with no spaces.
-EXPECTED_MIN_ASSERTIONS=25
+EXPECTED_MIN_ASSERTIONS=26
 
 # Color output (respects NO_COLOR)
 if [[ -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" && -t 1 ]]; then
@@ -349,7 +349,12 @@ if [[ -f "$gitignore" ]]; then
   # Match an actual ignore RULE, not a comment. .gitignore carries an explanatory
   # comment containing this filename; grepping the whole file would let the comment
   # alone satisfy the assertion and make it impossible to fail.
-  if grep -vE '^[[:space:]]*#' "$gitignore" | grep -qE 'environment\.md'; then
+  #
+  # Capture the comment-stripped rules once, then grep them via here-string.
+  # `grep -v ... | grep -q ...` risks SIGPIPE under pipefail: the second grep can
+  # exit the instant it matches while the first grep still has more to write.
+  gitignore_rules=$(grep -vE '^[[:space:]]*#' "$gitignore")
+  if grep -qE 'environment\.md' <<< "$gitignore_rules"; then
     pass ".gitignore blocks environment.md (skills/*/environment.md pattern)"
   else
     fail ".gitignore should block environment.md (skills/*/environment.md)"
@@ -358,13 +363,67 @@ if [[ -f "$gitignore" ]]; then
   # Same comment-stripping as the environment.md rule above. Grepping the whole file
   # lets an explanatory comment that merely names `*.env` satisfy the assertion that
   # `*.env` is ignored, which is mere occurrence rather than an actual ignore rule.
-  if grep -vE '^[[:space:]]*#' "$gitignore" | grep -qE '\*\.env'; then
+  if grep -qE '\*\.env' <<< "$gitignore_rules"; then
     pass ".gitignore blocks *.env files"
   else
     fail ".gitignore should block *.env files"
   fi
 else
   fail ".gitignore exists (needed for security)"
+fi
+
+# --- No pipeline under `pipefail` feeds an early-exit consumer ---
+# `producer | grep -q ...` (or `| grep -m N` or `| head`) is a correctness bug, not
+# style: those consumers exit the INSTANT they have what they need, closing the pipe.
+# Under `set -o pipefail` the producer's resulting SIGPIPE termination (128+13=141)
+# becomes the whole PIPELINE's exit status -- reporting a MATCH as a FAILURE. This is
+# the exact bug behind scripts/convert.sh's old
+# `printf '%s\n' "$body" | grep -q '^# '`: a byte-identical, perfectly valid SKILL.md
+# intermittently "failed" validation precisely because the match won the race. This
+# check exists to keep that class of bug from coming back anywhere in the repo.
+printf '\n%s\n' "${C_BOLD}No pipeline under pipefail feeds an early-exit consumer${C_RESET}"
+
+# Every script that sets pipefail, except this one. test-security.sh necessarily
+# quotes the forbidden shape in the comment above and in the detection regex below --
+# scanning it would trip its own check. Same rationale as the tests/ exclusion in the
+# scan corpus built earlier in this file ("test scripts necessarily reference the
+# patterns they scan for and would cause false positives").
+_pipefail_scripts=""
+for _pf_script in "$REPO_ROOT"/tests/*.sh "$REPO_ROOT"/scripts/*.sh; do
+  [[ -f "$_pf_script" ]] || continue
+  [[ "$(basename "$_pf_script")" == "$(basename "${BASH_SOURCE[0]}")" ]] && continue
+  grep -qE 'pipefail' "$_pf_script" 2>/dev/null || continue
+  _pipefail_scripts="${_pipefail_scripts}${_pf_script}"$'\n'
+done
+
+# Text-based scan, not a real bash parser -- it does not understand heredocs or
+# quoted strings, so a fixture that literally contains "| head" as example TEXT could
+# false-positive. None does today (checked by hand); if one ever does, narrow the
+# exclusion for that file rather than deleting this check.
+_bad_pipe_hits=""
+while IFS= read -r _pf_script; do
+  [[ -z "$_pf_script" ]] && continue
+  _hits=$(awk '
+    /^[[:space:]]*#/ { next }                  # whole-line comments are not live code
+    {
+      line = $0
+      # `||` is logical OR, not a pipeline -- a command after it does not read the
+      # previous command'\''s stdout, so it cannot SIGPIPE it. Collapse every `||`
+      # first so a real `|` is never mistaken for the second half of `||`.
+      gsub(/\|\|/, "OO", line)
+      if (line ~ /\|[[:space:]]*(grep[[:space:]]+-[A-Za-z]*q|grep[[:space:]]+-[A-Za-z]*m|head)([[:space:]]|$)/) {
+        print FILENAME ":" NR ": " $0
+      }
+    }
+  ' "$_pf_script" 2>/dev/null)
+  [[ -n "$_hits" ]] && _bad_pipe_hits="${_bad_pipe_hits}${_hits}"$'\n'
+done <<< "$_pipefail_scripts"
+
+if [[ -z "$_bad_pipe_hits" ]]; then
+  pass "No pipeline under pipefail feeds an early-exit consumer (grep -q, grep -m, head)"
+else
+  fail "Pipeline(s) under pipefail feed an early-exit consumer -- the producer's SIGPIPE reports a MATCH as a FAILURE"
+  printf '%s' "$_bad_pipe_hits" | while IFS= read -r line; do [[ -n "$line" ]] && printf "       %s\n" "$line"; done
 fi
 
 # --- Summary ---

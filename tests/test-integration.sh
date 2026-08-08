@@ -314,8 +314,17 @@ for i in 0 1 2 3; do
     pass "$name: committed $rel matches generated output"
   else
     fail "$name: committed $rel is STALE -- run scripts/convert.sh and commit the result"
-    diff -u "$committed" "$generated" 2>/dev/null | head -12 | \
-      while IFS= read -r line; do printf "       %s\n" "$line"; done
+    # Capture diff's full output before slicing it, then bound the print loop in
+    # pure bash. `diff | head -12` risks SIGPIPE under pipefail: head can exit
+    # after 12 lines while diff still has more to write (see convert.sh's
+    # printf|grep -q fix for the full mechanism).
+    diff_out=$(diff -u "$committed" "$generated" 2>/dev/null || true)
+    _diff_shown=0
+    while IFS= read -r line; do
+      [[ $_diff_shown -ge 12 ]] && break
+      printf "       %s\n" "$line"
+      _diff_shown=$((_diff_shown + 1))
+    done <<< "$diff_out"
   fi
 done
 
@@ -371,7 +380,7 @@ if [[ -f "$GEN_CURSOR" ]]; then
 
   # Cursor .mdc should NOT have the original SKILL.md 'name:' frontmatter field
   first_ten=$(head -10 "$GEN_CURSOR")
-  if echo "$first_ten" | grep -qE '^name:'; then
+  if grep -qE '^name:' <<< "$first_ten"; then
     fail "Cursor .mdc must not have 'name:' in its frontmatter (should use Cursor format)"
   else
     pass "Cursor .mdc does not have 'name:' in frontmatter (correct Cursor format)"
@@ -433,8 +442,11 @@ if [[ -f "$GEN_AIDER" ]]; then
     pass "Aider CONVENTIONS.md does not contain SKILL.md 'name:' field"
   fi
 
-  # Verify body starts with expected content (not just a blank or garbled file)
-  if head -3 "$GEN_AIDER" | grep -q "Requires:.*op.*CLI"; then
+  # Verify body starts with expected content (not just a blank or garbled file).
+  # Capture head's output first: `head -3 | grep -q` risks SIGPIPE under pipefail
+  # if grep matches inside the first 3 lines while head is still writing.
+  aider_first3=$(head -3 "$GEN_AIDER")
+  if grep -q "Requires:.*op.*CLI" <<< "$aider_first3"; then
     pass "Aider output body starts with expected content"
   else
     fail "Aider output body does not start with expected content (possible strip_frontmatter bug)"
@@ -462,8 +474,11 @@ if [[ -f "$GEN_WINDSURF" ]]; then
     pass "Windsurf .windsurfrules does not contain SKILL.md 'name:' field"
   fi
 
-  # Verify body starts with expected content (not just a blank or garbled file)
-  if head -3 "$GEN_WINDSURF" | grep -q "Requires:.*op.*CLI"; then
+  # Verify body starts with expected content (not just a blank or garbled file).
+  # Capture head's output first: `head -3 | grep -q` risks SIGPIPE under pipefail
+  # if grep matches inside the first 3 lines while head is still writing.
+  windsurf_first3=$(head -3 "$GEN_WINDSURF")
+  if grep -q "Requires:.*op.*CLI" <<< "$windsurf_first3"; then
     pass "Windsurf output body starts with expected content"
   else
     fail "Windsurf output body does not start with expected content (possible strip_frontmatter bug)"
@@ -517,8 +532,19 @@ for i in 0 1 2 3; do
     fail "$name output missing -- cannot verify file size"
     continue
   fi
-  size=$(wc -c < "$path" 2>/dev/null || echo 0)
-  [[ "$size" =~ ^[0-9]+$ ]] || size=0
+  # BSD `wc` left-pads its count ("   12414"); GNU `wc` does not. Stripping
+  # whitespace is required for the numeric guard below to accept a perfectly
+  # good measurement on macOS. Without the strip, the guard rejected the padded
+  # string, substituted 0, and reported a healthy 12KB file as "only 0 bytes --
+  # likely truncated" -- a failed MEASUREMENT masquerading as a failed FILE.
+  size=$(wc -c < "$path" 2>/dev/null | tr -d '[:space:]')
+  if [[ ! "$size" =~ ^[0-9]+$ ]]; then
+    # Distinguish "could not measure" from "measured, and it is too small".
+    # Collapsing the former into the latter invents a content defect out of a
+    # tooling failure and sends the reader hunting the wrong bug.
+    fail "$name output size could not be measured (wc -c returned '${size}')"
+    continue
+  fi
   if [[ "$size" -gt 5120 ]]; then
     pass "$name output is >5KB (${size} bytes)"
   else

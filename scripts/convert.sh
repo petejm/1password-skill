@@ -188,7 +188,11 @@ validate_source() {
     error "$SOURCE_SKILL has no content after its YAML frontmatter"
     exit 1
   fi
-  if ! printf '%s\n' "$body" | grep -q '^# '; then
+  # Here-string, not `printf | grep -q`: grep -q exits the instant it matches,
+  # closing the pipe. Under `set -e -o pipefail` that SIGPIPEs the printf producer
+  # and makes the whole pipeline return 141 -- reporting a MATCH as a FAILURE. A
+  # here-string is a single command, so pipefail never applies.
+  if ! grep -q '^# ' <<< "$body"; then
     error "$SOURCE_SKILL body has no top-level '# ' heading"
     exit 1
   fi

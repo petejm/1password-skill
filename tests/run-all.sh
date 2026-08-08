@@ -58,8 +58,14 @@ fi
 # Falls back to 1 (the old behaviour) when the constant is absent, which is still a
 # failure and still forces OVERALL_EXIT=1.
 expected_for_suite() {
-  local script="$1" n=""
-  n=$(grep -E '^EXPECTED_MIN_ASSERTIONS=[0-9]+$' "$script" 2>/dev/null | head -1 | cut -d= -f2)
+  local script="$1" n="" matches="" first=""
+  # Read every match into a variable first, then slice it in pure bash.
+  # `grep | head -1 | cut` risks SIGPIPE under pipefail: head can exit after its
+  # first line while grep still has more to write (see convert.sh's
+  # printf|grep -q fix for the full mechanism).
+  matches=$(grep -E '^EXPECTED_MIN_ASSERTIONS=[0-9]+$' "$script" 2>/dev/null || true)
+  first="${matches%%$'\n'*}"
+  n="${first#*=}"
   [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] || n=1
   printf '%s\n' "$n"
 }
