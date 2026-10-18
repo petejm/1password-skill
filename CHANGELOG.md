@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- SKILL.md `## Agent Sessions` — how desktop-app approvals behave when the caller is an
+  agent: authorisation is per process tree and every tool call is a new one, so prompts
+  recur; what reduces them (batching, service accounts, "Approve for all applications");
+  what happens to commands nobody can approve (`authorization timeout`, and
+  `failed to fill whole buffer` from `op-ssh-sign`); and the ssh flags that hide the prompt
+  (`BatchMode=yes`) or disguise it (`Connection timed out during banner exchange`)
+- SKILL.md SSH Agent → Windows: the four failures that break a working agent on native
+  Windows — the built-in `ssh-agent` service competing for the named pipe, shell profiles
+  that restart it, Git Bash / MSYS2 `ssh` being unable to reach the pipe (which is what an
+  agent's Bash tool runs on Windows), and `IdentityAgent` pointing at the pipe path — plus
+  diagnosing from `Will attempt key:` lines
+- SKILL.md: `IdentitiesOnly yes` caveat — with no key files on disk it rejects every agent
+  key; pin it to the key's public half instead
+- Error catalog: Windows `Permission denied` with keys listed, Git Bash "Could not open a
+  connection", `authorization timeout`, `failed to fill whole buffer`, and
+  `Connection timed out during banner exchange`
+- Decision router and README table rows for the above
+
 ### Changed
 
 - Every secret-reference example now brackets the vault segment:

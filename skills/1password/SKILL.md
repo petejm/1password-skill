@@ -12,7 +12,8 @@ when_to_use: |
   Trigger phrases: '1password', 'op cli', 'op account get', 'op run', 'op read',
   'op inject', 'secret reference', 'op://', 'ssh agent 1password',
   'git signing 1password', 'biometric prompt', 'vault', '1password ssh',
-  'service account', 'op plugin'.
+  'service account', 'op plugin', 'authorization timeout', 'windows ssh-agent',
+  'approval prompt'.
 license: Apache-2.0
 compatibility: |
   Requires 1Password CLI (op) 2.30.0+ with the 1Password desktop app integration
@@ -32,7 +33,9 @@ compatibility: |
 | Don't know the vault, item, or field name | → Runtime Access |
 | Setting up op:// in config files / .env | → Config File Patterns |
 | SSH agent not responding / wrong socket path | → SSH Agent |
+| Windows: `ssh-add -l` lists keys but `git push` / `ssh` still fails | → SSH Agent |
 | Git commit signing setup or failures | → Git Signing |
+| Approval prompt on every agent tool call, or `authorization timeout` | → Agent Sessions |
 | `gh`, `aws`, or `claude` should authenticate through 1Password | → Shell Plugins |
 | Headless / CI / no desktop app available | → Service Accounts |
 | `op` hangs, times out, or biometric won't appear | → Troubleshooting |
@@ -276,6 +279,46 @@ Best practice: set `SSH_AUTH_SOCK` in your shell profile (`~/.bashrc`, `~/.zshrc
 `\\.\pipe\openssh-ssh-agent`, and git needs
 `git config --global core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe"`.
 
+**Windows (native, not WSL) — the four things that break a working agent.** All of them surface
+as `Permission denied (publickey)`, which looks like an authentication problem and is not one.
+
+1. **The Windows `ssh-agent` service competes for the same pipe.** Windows ships its own
+   "OpenSSH Authentication Agent" service, which listens on `\\.\pipe\openssh-ssh-agent` too.
+   Named pipes let both servers hold instances at once and each client connection lands on
+   whichever accepts first, so `ssh-add -l` can list every 1Password key while the very next
+   `git push` reaches the empty Windows agent. Check its state first — this is read-only and
+   raises no prompt:
+   ```powershell
+   Get-Service ssh-agent        # want: Status Stopped, StartType Disabled
+   ```
+   If it is not both, run from an elevated PowerShell started with `-NoProfile`:
+   `Stop-Service ssh-agent -Force; Set-Service ssh-agent -StartupType Disabled`.
+   While it is still `Manual`, do not "diagnose" with `ssh-add` or `ssh -T`: they can
+   demand-start the service and take the pipe from a healthy 1Password agent.
+2. **Shell profiles can restart that service.** Some PowerShell prompt modules (pshazz, for one)
+   enable and start `ssh-agent` on every shell startup, so the fix above silently undoes itself
+   — and an elevated shell opened to fix it re-breaks it through its own profile. Use
+   `powershell -NoProfile` / `pwsh -NoProfile` for scripted or elevated work, and check the
+   profile (`$PROFILE`) if the service keeps coming back.
+3. **Git Bash / MSYS2 `ssh` cannot reach the named pipe.** Its `ssh-add -l` reports
+   "Could not open a connection to your authentication agent", and `ssh` falls back to key files
+   on disk. With a ProxyJump the error names the **jump host**, which is misleading. Agent
+   harnesses hit this constantly — on Windows, Claude Code's Bash tool runs Git Bash. Fix: set
+   `core.sshCommand` as above for git, and call `/c/Windows/System32/OpenSSH/ssh.exe` explicitly
+   (or run from PowerShell) for plain `ssh`.
+4. **Leave `IdentityAgent` unset on Windows.** Windows OpenSSH finds the pipe by itself; an
+   `IdentityAgent` line pointing at the backslash pipe path has been observed to be mis-parsed,
+   after which ssh silently falls back to key files on disk. `IdentityAgent none` (a keyword, not
+   a path) is fine for opting a host out.
+
+Diagnose from the `Will attempt key:` lines, not the agent's key count — the count looks healthy
+even when every key is being filtered out:
+```bash
+ssh -G <host> | grep -E '^identit'        # identitiesonly yes? see the caveat below
+ssh -v -o BatchMode=yes <host> exit 2>&1 | grep 'Will attempt key'
+# lines ending in "agent" = the agent's keys are being offered
+```
+
 WSL has a supported 1Password integration and needs no pipe forwarding — it covers both WSL 1 and
 WSL 2 and authenticates SSH and git commands against the 1Password SSH agent running on the
 Windows host. In WSL, point git at the Windows client with
@@ -301,6 +344,16 @@ Per-host opt-out: `IdentityAgent none`. If a server rejects you with "Too many a
 failures", the agent offered more than its `MaxAuthTries` (default 6) before the right key — pin
 the key for that host with `IdentityFile` plus `IdentitiesOnly yes`, or narrow the agent's key
 list in `agent.toml`.
+
+> **`IdentitiesOnly yes` needs a matching `IdentityFile`.** It tells ssh to use only agent keys
+> that match a configured identity file (or the default `~/.ssh/id_*` paths). When keys live only
+> in 1Password and nothing is on disk, that set is empty and every agent key is rejected with
+> `Permission denied (publickey)`. Pin it to the key's **public** half — save the public key from
+> 1Password as `~/.ssh/<name>.pub` and set `IdentityFile ~/.ssh/<name>.pub`. A `Host *` block
+> carrying `IdentitiesOnly yes` left over from when private keys were on disk is a common cause
+> of the agent "suddenly" not working after those keys are deleted. If your ssh build rejects a
+> `.pub` identity file with `invalid format`, drop `IdentitiesOnly` and narrow `agent.toml`
+> instead.
 
 **agent.toml — which keys the agent offers.** Without this file the agent offers only SSH key items
 in your default Personal, Private, or Employee vault, so a key in a Work or shared vault is
@@ -451,6 +504,49 @@ Bash call that creates it.
 - **1Password Connect** — self-hosted server that caches your data in your own infrastructure; unlimited re-requests, no per-item rate limit. Kubernetes and high-volume infra. Configured via `OP_CONNECT_HOST` / `OP_CONNECT_TOKEN`; managed with the `op connect` command family.
   - Narrow command surface: with a Connect server only `op run`, `op inject`, `op read`, and `op item get --format json` are supported. The `--reveal` idiom used everywhere else in this skill does not apply, and `--format json` returns every field in cleartext — Security Rule 1 applies to each read.
 
+## Agent Sessions
+
+How the desktop-app approval model behaves when the caller is an agent rather than a person at
+a terminal.
+
+**Approvals are per process tree, and every tool call is a new tree.** 1Password authorises "a
+specific application (including all of its subprocesses)" for the session duration set under
+Settings → Developer. An agent harness starts a fresh shell for each tool call, so each call can
+count as a new application: the session never accumulates and a prompt can appear on nearly
+every `op`, `ssh` or signed `git` call. Setting "Ask approval for each new" to **application**
+(rather than application *and terminal session*) is still correct, but it does not stop this.
+On macOS approvals have been observed to persist across agent calls far more often than on
+Windows, so a fix "verified on the Mac" may not carry over — test each platform separately.
+
+What actually reduces prompts:
+
+1. **Batch.** One script or one `op run` that does ten secret-consuming steps costs one approval;
+   ten tool calls can cost ten. Keep signing on one machine and send artifacts to it, rather than
+   running `op` on several.
+2. **Service account** for anything that must run unattended (see Service Accounts) — no desktop
+   app, no prompt. It does not cover the SSH agent or commit signing, which always go through the
+   desktop app.
+3. **"Approve for all applications"** on the prompt grants a temporary all-process authorisation —
+   useful for one long session, not a configuration.
+
+**Commands nobody can approve.** A command started in the background, or while nobody is at the
+machine, raises a prompt that may open behind other windows and then expires. `op` fails with
+`authorization timeout`; signed commits and tags fail with
+`error: 1Password: failed to fill whole buffer` and `fatal: failed to write commit object`, which
+read like key corruption and are only an unanswered dialog. Do not retry in a loop — each retry
+raises another prompt. Ask the user to run the command themselves while they are at the desk: in
+Claude Code, `! <command>` runs it in the session so the output lands in the conversation and the
+approval is tied to their own action.
+
+**SSH flags that hide the prompt.** `-o BatchMode=yes` fails immediately without ever raising the
+approval, so it looks like a hard authentication failure. To let the dialog appear without hanging
+on an unanswerable password prompt, use `-o BatchMode=no -o NumberOfPasswordPrompts=0`. While an
+approval is pending, a ProxyJump connection reports `Connection timed out during banner exchange`,
+which reads like a network fault.
+
+**`ssh-add -l` proves nothing about signing.** Listing keys needs no authorisation; using one does.
+A healthy key list followed by a failed push or signature means an approval was missing, not a key.
+
 ## Error Catalog
 
 ```text
@@ -462,6 +558,17 @@ symptom where the exact wording is not something this skill verified.
 "Permission denied (publickey)"
 → 1Password locked or SSH agent not configured
 → Fix: `op account get` (triggers biometric), `ssh-add -l` to verify keys loaded
+
+"Permission denied (publickey)" on Windows while ssh-add -l lists the 1Password keys
+→ The Windows ssh-agent service is answering on the same pipe, or IdentitiesOnly yes is
+  filtering every agent key out
+→ Fix: Get-Service ssh-agent must show Stopped + Disabled; check ssh -G <host> for
+  identitiesonly yes. See SSH Agent → Windows
+
+"Could not open a connection to your authentication agent" in Git Bash / MSYS2 on Windows
+→ MSYS ssh cannot reach the named pipe; the 1Password agent may be fine
+→ Fix: git config --global core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe", and call
+  that ssh.exe directly (or use PowerShell) for plain ssh
 
 "Could not open a connection to your authentication agent"
 → SSH_AUTH_SOCK not set, or pointing at a socket that does not exist
@@ -514,6 +621,21 @@ Commands that worked start failing / op asks to authenticate again mid-session
 "sign_and_send_pubkey: signing failed ... agent refused operation"
 → Biometric denied or 1Password not running
 → Fix: check for prompt on desktop, restart app, then `op account get`
+
+"authorization timeout"
+→ The approval prompt was raised and nobody answered it — common for background or unattended
+  commands, whose prompt can open behind other windows
+→ Fix: have the user run the command while at the desk (Claude Code: `! <command>`). See
+  Agent Sessions
+
+"failed to fill whole buffer" followed by "fatal: failed to write commit object"
+→ op-ssh-sign's approval prompt went unanswered; the key is fine
+→ Fix: re-run while the user is present. A service account does not help — signing always
+  goes through the desktop app
+
+"Connection timed out during banner exchange" through a ProxyJump
+→ Often an approval pending on the desktop, not a network fault
+→ Fix: check for the prompt; avoid -o BatchMode=yes, which suppresses it (see Agent Sessions)
 
 "No principal matched" from git log --show-signature (GitHub may still show Verified)
 → The allowed-signers file exists but has no line for the committer email. git still prints
