@@ -27,6 +27,8 @@ Gives Claude a **decision router** — a lookup table that maps what you're seei
 | Setting up `op://` references | Guide you through `.env` templates and `op inject` |
 | SSH agent not responding | Check socket paths per OS, verify with `ssh-add -l` |
 | Git commit signing failures | Configure `op-ssh-sign` with the right paths |
+| Windows: keys listed but `git push` still fails | Check the competing `ssh-agent` service, Git Bash's ssh, and `IdentitiesOnly` |
+| A prompt on every agent call, or `authorization timeout` | Batch the work, or hand the command to you to run while you're present |
 | `gh`, `aws`, or `claude` should authenticate through 1Password | Set up the matching shell plugin with `op plugin init` |
 | Headless / CI, no desktop app available | Switch to a service account token (`OP_SERVICE_ACCOUNT_TOKEN`) |
 | Common `op` errors | Match the error → cause → fix |
